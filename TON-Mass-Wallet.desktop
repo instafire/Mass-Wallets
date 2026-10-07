@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=TON Mass Wallet Studio
+GenericName=TON Mass Wallet Manager
+Comment=Production-ready TON Mass Wallet Generator, Treasury Balancer & Manager
+Exec=/home/aman/Desktop/TON-Mass-Wallet/start.sh
+Icon=/home/aman/Desktop/TON-Mass-Wallet/icon.png
+Path=/home/aman/Desktop/TON-Mass-Wallet
+Terminal=false
+StartupNotify=true
+Categories=Utility;Finance;Network;
+Keywords=ton;wallet;crypto;blockchain;tonkeeper;
