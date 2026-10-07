@@ -943,7 +943,8 @@ export const WalletList: React.FC<WalletListProps> = ({
                   const balanceNum = parseFloat(wallet.balance || "0");
                   const isSelected = selectedIds.has(wallet.id);
                   const isSolanaWallet = wallet.chain === "solana" || wallet.version === "solana-ed25519" || wallet.version === "squads-v4";
-                  const isGasReady = balanceNum >= (isSolanaWallet ? 0.00001 : 0.005);
+                  const hasTokens = (wallet.jettons || []).some(j => parseFloat(j.balance || '0') > 0);
+                  const isGasReady = balanceNum >= (isSolanaWallet ? 0.00001 : 0.005) || hasTokens;
                   const isLowGas = balanceNum > 0 && balanceNum < (isSolanaWallet ? 0.00001 : 0.005);
 
                   return (
@@ -1077,7 +1078,7 @@ export const WalletList: React.FC<WalletListProps> = ({
                         {isGasReady ? (
                           <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-semibold">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                            Funded
+                            {hasTokens && balanceNum < (isSolanaWallet ? 0.00001 : 0.005) ? 'Tokens' : 'Funded'}
                           </span>
                         ) : isLowGas ? (
                           <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 font-semibold">

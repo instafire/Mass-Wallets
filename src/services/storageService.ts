@@ -309,6 +309,9 @@ export function normalizeWallet(w: any): ManagedWallet {
     networkBalances: {
       mainnet: {
         ...mainnetData,
+        ton: activeBalance,
+        tonNano: activeBalanceNano,
+        jettons: activeJettons,
         nfts: mainnetData.nfts || defaultNfts,
       },
       testnet: {
@@ -474,12 +477,63 @@ export class StorageService {
   }
 
   /**
-   * Comprehensive async loader: Checks IndexedDB -> LocalStorage -> Backend API
+   * Comprehensive async loader: Checks Backend API -> IndexedDB -> LocalStorage
+   * Authoritative backend API (/api/wallets) is checked first when running with local server.
    */
   public static async loadAllWalletsAsync(pin?: string): Promise<{ wallets: ManagedWallet[]; isEncrypted: boolean; config: VaultConfig }> {
     const config = this.getVaultConfig();
 
-    // 1. Try IndexedDB
+    // 1. Try Backend API (/api/wallets) first if available
+    try {
+      const resp = await fetch('/api/wallets');
+      if (resp.ok) {
+        const json = await resp.json();
+        const serverConfig: VaultConfig = json.vaultConfig || config;
+
+        if (json && json.encrypted === true && typeof json.payload === 'string') {
+          // Encrypted vault on server: seed the local encrypted caches
+          try {
+            localStorage.setItem(STORAGE_KEY_WALLETS, json.payload);
+            localStorage.setItem(STORAGE_KEY_BACKUP_ALT, json.payload);
+          } catch { /* quota — IndexedDB still primary */ }
+          await idbSet('wallets_payload', { encrypted: true, raw: json.payload, wallets: [], timestamp: Date.now() });
+          if (serverConfig) {
+            localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(serverConfig));
+          }
+          if (pin) {
+            const parsed = this.parseStoredData(json.payload, pin);
+            if (parsed.wallets.length > 0) {
+              return { wallets: parsed.wallets, isEncrypted: true, config: serverConfig };
+            }
+          }
+          return { wallets: [], isEncrypted: true, config: serverConfig };
+        }
+
+        if (json && Array.isArray(json.wallets) && json.wallets.length > 0) {
+          const normalized = normalizeWallets(json.wallets);
+
+          // Update local IndexedDB & LocalStorage so offline mode stays in sync with server truth
+          await idbSet('wallets_payload', { 
+            encrypted: false, 
+            raw: JSON.stringify({ encrypted: false, data: JSON.stringify(normalized), timestamp: Date.now() }), 
+            wallets: normalized, 
+            timestamp: Date.now() 
+          });
+          try {
+            localStorage.setItem(STORAGE_KEY_WALLETS, JSON.stringify({ encrypted: false, data: JSON.stringify(normalized), timestamp: Date.now() }));
+          } catch { /* quota */ }
+          if (serverConfig) {
+            localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(serverConfig));
+          }
+
+          return { wallets: normalized, isEncrypted: false, config: serverConfig };
+        }
+      }
+    } catch (err) {
+      console.warn('Backend API auto-load skipped or unavailable, falling back to local storage:', err);
+    }
+
+    // 2. Try IndexedDB
     try {
       const idbData: any = await idbGet('wallets_payload');
       if (idbData) {
@@ -500,7 +554,7 @@ export class StorageService {
       console.warn('Error reading from IndexedDB:', err);
     }
 
-    // 2. Try LocalStorage
+    // 3. Try LocalStorage
     const localRes = this.loadWallets(pin);
     if (localRes.wallets.length > 0 || localRes.isEncrypted) {
       // Sync to IndexedDB for safety
@@ -508,46 +562,6 @@ export class StorageService {
         idbSet('wallets_payload', { encrypted: false, wallets: localRes.wallets, timestamp: Date.now() });
       }
       return { wallets: localRes.wallets, isEncrypted: localRes.isEncrypted, config };
-    }
-
-    // 3. Try Backend API (/api/wallets)
-    // The server may return either a plaintext vault (legacy / unlocked) or
-    // an OPAQUE ENCRYPTED BLOB (PIN-locked vault). A blob is never decrypted
-    // here without the PIN and never written back as plaintext.
-    try {
-      const resp = await fetch('/api/wallets');
-      if (resp.ok) {
-        const json = await resp.json();
-        const serverConfig: VaultConfig = json.vaultConfig || config;
-
-        if (json && json.encrypted === true && typeof json.payload === 'string') {
-          // Encrypted vault on server: seed the local encrypted caches so the
-          // unlock screen can decrypt offline, then require the PIN.
-          try {
-            localStorage.setItem(STORAGE_KEY_WALLETS, json.payload);
-            localStorage.setItem(STORAGE_KEY_BACKUP_ALT, json.payload);
-          } catch { /* quota — IndexedDB still primary */ }
-          await idbSet('wallets_payload', { encrypted: true, raw: json.payload, wallets: [], timestamp: Date.now() });
-          if (serverConfig) {
-            localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(serverConfig));
-          }
-          return { wallets: [], isEncrypted: true, config: serverConfig };
-        }
-
-        if (json && Array.isArray(json.wallets) && json.wallets.length > 0) {
-          const normalized = normalizeWallets(json.wallets);
-
-          // Seed local caches
-          this.saveWallets(normalized);
-          if (serverConfig) {
-            localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(serverConfig));
-          }
-
-          return { wallets: normalized, isEncrypted: false, config: serverConfig };
-        }
-      }
-    } catch (err) {
-      console.warn('Backend API auto-load skipped or unavailable:', err);
     }
 
     return { wallets: [], isEncrypted: false, config };

@@ -999,53 +999,26 @@ export class SolanaService {
     const addresses = wallets.map(w => w.address);
     const balanceMap = await this.fetchBalancesBulk(addresses, network);
 
-    // 2. Fetch known SPL & Token-2022 tokens in bulk via getMultipleAccountsInfo (immune to 429 rate limit)
+    // 2. Fetch known SPL & Token-2022 tokens in bulk via getMultipleAccountsInfo (instant & rate-limit immune)
     const knownTokensMap = await this.fetchKnownTokensBulk(wallets, network);
 
-    // 3. For Master Treasury and custom imported wallets, attempt on-chain discovery for any unlisted tokens
-    const unlistedDiscoveryMap = new Map<string, JettonBalance[]>();
-    const priorityWallets = wallets.filter(w => w.isMainWallet || w.isCustomImport);
-    for (const pw of priorityWallets) {
-      try {
-        const discovered = await this.fetchSplTokens(pw.address, network);
-        if (discovered && discovered.length > 0) {
-          unlistedDiscoveryMap.set(pw.address, discovered);
-        }
-      } catch (e) {
-        console.warn(`Discovery fetch skipped for ${pw.address}:`, e);
-      }
-    }
-
-    // 4. Merge results per wallet and fire live callbacks
+    // 3. Immediately merge native + known tokens and fire live callbacks (runs in <350ms)
     let done = 0;
     for (let i = 0; i < updated.length; i++) {
       const wallet = updated[i];
       try {
         const res = balanceMap.get(wallet.address);
-        if (!res) {
-          updated[i] = { ...updated[i], balanceStale: true };
-          if (onWalletUpdated) onWalletUpdated(updated[i]);
-          continue;
-        }
+        const solBal = res ? res.balance : wallet.balance;
+        const solNano = res ? res.balanceNano : wallet.balanceNano;
 
-        const solBal = res.balance;
-        const solNano = res.balanceNano;
-
-        // Known tokens from bulk ATA query
+        // Known tokens from bulk ATA query (includes MYA, USDC, USDT, BONK, etc.)
         const knownTokens = knownTokensMap.get(wallet.address) || [];
 
-        // Discovered tokens from on-chain account parsing (if any)
-        const discoveredTokens = unlistedDiscoveryMap.get(wallet.address) || [];
-
-        // Merge tokens: priority to tokens with positive balance
+        // Build token map: known tokens first
         const tokenMap = new Map<string, JettonBalance>();
         knownTokens.forEach(t => tokenMap.set(t.jettonAddress || t.symbol, t));
-        discoveredTokens.forEach(t => {
-          const key = t.jettonAddress || t.symbol;
-          tokenMap.set(key, t);
-        });
 
-        // Also ensure any existing wallet tokens with balance > 0 are preserved
+        // Preserve any previously known wallet tokens with balance > 0
         (wallet.jettons || []).forEach(existing => {
           const key = existing.jettonAddress || existing.symbol;
           if (parseFloat(existing.balance || '0') > 0 && !tokenMap.has(key)) {
@@ -1073,7 +1046,7 @@ export class SolanaService {
           jettons: finalTokens,
           networkBalances: updatedNetBalances,
           lastChecked: Date.now(),
-          balanceStale: false,
+          balanceStale: !res,
         };
 
         if (onWalletUpdated) {
@@ -1087,6 +1060,57 @@ export class SolanaService {
         done++;
         if (onProgress) onProgress(done, updated.length);
       }
+    }
+
+    // 4. Background on-chain discovery for custom / unlisted tokens (non-blocking, 3s timeout)
+    const priorityWallets = updated.filter(w => w.isMainWallet || w.isCustomImport);
+    if (priorityWallets.length > 0) {
+      (async () => {
+        for (const pw of priorityWallets) {
+          try {
+            const timeoutPromise = new Promise<null>(r => setTimeout(() => r(null), 3000));
+            const discovered = await Promise.race([
+              this.fetchSplTokens(pw.address, network),
+              timeoutPromise
+            ]);
+            if (discovered && discovered.length > 0) {
+              const idx = updated.findIndex(w => w.address === pw.address);
+              if (idx !== -1) {
+                const currentJettons = updated[idx].jettons || [];
+                const tMap = new Map<string, JettonBalance>();
+                currentJettons.forEach(t => tMap.set(t.jettonAddress || t.symbol, t));
+                let changed = false;
+                discovered.forEach(d => {
+                  const key = d.jettonAddress || d.symbol;
+                  if (!tMap.has(key) || tMap.get(key)!.balance !== d.balance) {
+                    tMap.set(key, d);
+                    changed = true;
+                  }
+                });
+                if (changed) {
+                  const mergedJettons = Array.from(tMap.values());
+                  updated[idx] = {
+                    ...updated[idx],
+                    jettons: mergedJettons,
+                    networkBalances: {
+                      ...updated[idx].networkBalances,
+                      [network]: {
+                        ton: updated[idx].balance,
+                        tonNano: updated[idx].balanceNano,
+                        jettons: mergedJettons,
+                        nfts: updated[idx].nfts || [],
+                      },
+                    },
+                  };
+                  if (onWalletUpdated) onWalletUpdated(updated[idx]);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`Background discovery skipped for ${pw.address}:`, e);
+          }
+        }
+      })().catch(() => {});
     }
 
     return updated;

@@ -315,7 +315,12 @@ export const SendModal: React.FC<SendModalProps> = ({
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-semibold text-gray-300">Amount ({selectedToken}):</label>
               <span className="text-xs text-gray-400">
-                Available: <span className="text-emerald-400 font-bold">{currentWallet?.balance || '0.00'} {isSolana ? 'SOL' : 'TON'}</span>
+                Available: <span className="text-emerald-400 font-bold">
+                  {selectedToken === (isSolana ? 'SOL' : 'TON')
+                    ? `${currentWallet?.balance || '0.00'} ${isSolana ? 'SOL' : 'TON'}`
+                    : `${selectedJetton?.balance || '0.00'} ${selectedToken}`
+                  }
+                </span>
               </span>
             </div>
             <div className="relative">
