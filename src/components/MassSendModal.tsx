@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { ManagedWallet, Network, MassSendItem } from '../types';
+import { isSolanaWallet } from '../types';
 import { TonService, SUPPORTED_JETTONS } from '../services/tonService';
 import { SolanaService, SUPPORTED_SOLANA_TOKENS } from '../services/solanaService';
 import confetti from 'canvas-confetti';
@@ -31,6 +32,11 @@ export const MassSendModal: React.FC<MassSendModalProps> = ({
   const [rawTextInput, setRawTextInput] = useState<string>('');
   const [inputMode, setInputMode] = useState<'selected' | 'text'>('selected');
 
+  const equalAmountRef = useRef(equalAmount);
+  equalAmountRef.current = equalAmount;
+  const globalCommentRef = useRef(globalComment);
+  globalCommentRef.current = globalComment;
+
   useEffect(() => {
     if (senderWallets.length > 0 && !senderId) {
       const sorted = [...senderWallets].sort((a, b) => parseFloat(b.balance || '0') - parseFloat(a.balance || '0'));
@@ -39,7 +45,7 @@ export const MassSendModal: React.FC<MassSendModalProps> = ({
   }, [senderWallets, senderId]);
 
   const activeSender = senderWallets.find(w => w.id === senderId);
-  const isSolanaSender = activeSender?.chain === 'solana' || activeSender?.version === 'solana-ed25519' || activeSender?.version === 'squads-v4';
+  const isSolanaSender = isSolanaWallet(activeSender);
 
   useEffect(() => {
     if (isSolanaSender && selectedToken === 'TON') {
@@ -47,14 +53,14 @@ export const MassSendModal: React.FC<MassSendModalProps> = ({
     } else if (!isSolanaSender && selectedToken === 'SOL') {
       setSelectedToken('TON');
     }
-  }, [isSolanaSender]);
+  }, [isSolanaSender, selectedToken]);
 
   useEffect(() => {
     if (preSelectedRecipients.length > 0) {
       const items: MassSendItem[] = preSelectedRecipients.map(w => ({
         recipientAddress: w.address,
-        amount: equalAmount,
-        comment: globalComment,
+        amount: equalAmountRef.current,
+        comment: globalCommentRef.current,
         status: 'idle',
       }));
       setRecipients(items);

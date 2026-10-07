@@ -78,6 +78,8 @@ function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store, no-cache, must-revalidate',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
   });
   res.end(jsonStr);
 }
@@ -134,6 +136,8 @@ function serveStaticFile(req, res, filePath) {
     const headers = {
       'Content-Type': contentType,
       'Cache-Control': cacheControl,
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
     };
 
     // Compress text/js/css/json/svg if client supports gzip
@@ -168,6 +172,26 @@ const server = http.createServer(async (req, res) => {
   // ==========================================
   // API ENDPOINTS
   // ==========================================
+
+  // CSRF / Cross-Origin Security Check for API endpoints:
+  // Reject requests coming from unauthorized external websites
+  if (pathname.startsWith('/api/')) {
+    const origin = req.headers.origin;
+    if (origin) {
+      try {
+        const parsedOrigin = new URL(origin);
+        const hostAllowed = parsedOrigin.hostname === 'localhost' || 
+                            parsedOrigin.hostname === '127.0.0.1' || 
+                            parsedOrigin.hostname === '::1' ||
+                            parsedOrigin.hostname === host;
+        if (!hostAllowed) {
+          return sendJson(res, 403, { success: false, error: 'Forbidden: Cross-origin API request blocked' });
+        }
+      } catch {
+        return sendJson(res, 403, { success: false, error: 'Forbidden: Invalid origin' });
+      }
+    }
+  }
 
   // 1. Health check
   if (pathname === '/api/health' || pathname === '/api/ping') {
@@ -314,6 +338,16 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/rpc/solana' && req.method === 'POST') {
     try {
       const rawBody = await readBody(req);
+      let parsedRpc;
+      try {
+        parsedRpc = JSON.parse(rawBody);
+      } catch {
+        return sendJson(res, 400, { jsonrpc: '2.0', error: { code: -32700, message: 'Parse error: invalid JSON' } });
+      }
+      if (!parsedRpc || parsedRpc.jsonrpc !== '2.0' || typeof parsedRpc.method !== 'string') {
+        return sendJson(res, 400, { jsonrpc: '2.0', error: { code: -32600, message: 'Invalid Request: expected JSON-RPC 2.0 object' } });
+      }
+
       const upstreamEndpoints = [
         'https://solana-rpc.publicnode.com',
         'https://api.mainnet-beta.solana.com'
@@ -348,12 +382,22 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 404, { success: false, error: 'Unknown API endpoint' });
   }
 
-  let safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
-  if (safePath === '/' || safePath === '') {
-    safePath = '/index.html';
+  let decodedPath = '/index.html';
+  try {
+    decodedPath = decodeURIComponent(pathname);
+  } catch {
+    decodedPath = '/index.html';
+  }
+  const normalizedPath = path.normalize(decodedPath).replace(/^(\.\.[/\\])+/, '');
+  const targetPath = (normalizedPath === '/' || normalizedPath === '' || normalizedPath === '\\') ? '/index.html' : normalizedPath;
+  const staticFilePath = path.resolve(DIST_DIR, '.' + targetPath);
+
+  const distRoot = DIST_DIR.endsWith(path.sep) ? DIST_DIR : DIST_DIR + path.sep;
+  if (staticFilePath !== DIST_DIR && !staticFilePath.startsWith(distRoot)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    return res.end('403 Forbidden');
   }
 
-  const staticFilePath = path.join(DIST_DIR, safePath);
   serveStaticFile(req, res, staticFilePath);
 });
 

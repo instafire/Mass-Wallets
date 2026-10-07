@@ -69,24 +69,7 @@ export const MassNFTDisperseModal: React.FC<MassNFTDisperseModalProps> = ({
     }
   }, [isOpen, availableNFTs]);
 
-  if (!isOpen) return null;
-
-  const toggleSelectNFT = (id: string) => {
-    const next = new Set(selectedNFTIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedNFTIds(next);
-  };
-
-  const selectAllNFTs = () => {
-    if (selectedNFTIds.size === availableNFTs.length) {
-      setSelectedNFTIds(new Set());
-    } else {
-      setSelectedNFTIds(new Set(availableNFTs.map(item => item.nft.id)));
-    }
-  };
-
-  // Build the planned distribution queue
+  // Build the planned distribution queue (must be called unconditionally for Rules of Hooks)
   const selectedItems = availableNFTs.filter(item => selectedNFTIds.has(item.nft.id));
 
   const plannedQueue: MassNFTTransferItem[] = useMemo(() => {
@@ -123,6 +106,23 @@ export const MassNFTDisperseModal: React.FC<MassNFTDisperseModalProps> = ({
       });
     }
   }, [selectedItems, targetMode, recipientSubWallets, customRecipientsText, comment]);
+
+  if (!isOpen) return null;
+
+  const toggleSelectNFT = (id: string) => {
+    const next = new Set(selectedNFTIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedNFTIds(next);
+  };
+
+  const selectAllNFTs = () => {
+    if (selectedNFTIds.size === availableNFTs.length) {
+      setSelectedNFTIds(new Set());
+    } else {
+      setSelectedNFTIds(new Set(availableNFTs.map(item => item.nft.id)));
+    }
+  };
 
   const totalGasRequired = plannedQueue.length * 0.05;
 

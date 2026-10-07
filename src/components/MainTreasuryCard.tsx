@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { ManagedWallet, Network } from '../types';
+import { isSolanaWallet } from '../types';
 import { 
   Crown, 
   Copy, 
@@ -105,7 +106,7 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
     );
   }
 
-  const isSolana = mainWallet.chain === 'solana' || mainWallet.version === 'solana-ed25519' || mainWallet.version === 'squads-v4';
+  const isSolana = isSolanaWallet(mainWallet);
   const shortAddress = `${mainWallet.address.substring(0, 8)}...${mainWallet.address.substring(mainWallet.address.length - 6)}`;
   const treasuryBalNum = parseFloat(mainWallet.balance || '0');
   const treasuryNativeUsdVal = isSolana ? (treasuryBalNum * (priceData.solUsd || 154.20)) : (treasuryBalNum * (priceData.tonUsd || 5.42));

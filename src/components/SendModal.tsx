@@ -49,8 +49,6 @@ export const SendModal: React.FC<SendModalProps> = ({
     }
   }, [isOpen, initialRecipient]);
 
-  if (!isOpen) return null;
-
   const currentWallet = allWallets.find(w => w.id === selectedWalletId) || senderWallet;
   const isSolana = currentWallet?.chain === 'solana' || currentWallet?.version === 'solana-ed25519' || currentWallet?.version === 'squads-v4';
 
@@ -60,7 +58,9 @@ export const SendModal: React.FC<SendModalProps> = ({
     } else if (!isSolana && selectedToken === 'SOL') {
       setSelectedToken('TON');
     }
-  }, [isSolana]);
+  }, [isSolana, selectedToken]);
+
+  if (!isOpen) return null;
 
   const isAddressValid = recipient.trim() !== '' && (isSolana ? SolanaService.isValidAddress(recipient.trim()) : TonService.isValidAddress(recipient.trim()));
   const balanceNum = currentWallet ? parseFloat(currentWallet.balance || '0') : 0;

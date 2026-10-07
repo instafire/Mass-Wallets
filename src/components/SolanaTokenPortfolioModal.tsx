@@ -86,6 +86,23 @@ export const SolanaTokenPortfolioModal: React.FC<SolanaTokenPortfolioModalProps>
       });
     });
 
+    // Also initialize customTrackedMints
+    customTrackedMints.forEach(mint => {
+      if (!tokenMap.has(mint)) {
+        tokenMap.set(mint, {
+          symbol: `${mint.substring(0, 4)}...${mint.substring(mint.length - 4)}`,
+          name: `Custom Token (${mint.substring(0, 6)}...)`,
+          mintAddress: mint,
+          decimals: 6,
+          icon: '🪙',
+          totalBalance: 0,
+          usdPrice: 0,
+          totalUsdValue: 0,
+          holderWallets: [],
+        });
+      }
+    });
+
     // 2. Iterate through all wallets and their jettons / SPL tokens
     solanaWallets.forEach(wallet => {
       const tokens = wallet.jettons || [];

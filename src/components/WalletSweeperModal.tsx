@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { ManagedWallet, Network } from '../types';
+import { isSolanaWallet } from '../types';
 import { TonService, SUPPORTED_JETTONS } from '../services/tonService';
 import { SolanaService } from '../services/solanaService';
 import confetti from 'canvas-confetti';
@@ -41,17 +42,17 @@ export const WalletSweeperModal: React.FC<WalletSweeperModalProps> = ({
   if (!isOpen || !mainWallet) return null;
 
   const isSolanaMode = sweepChain === 'solana';
-  const solanaWallets = allWallets.filter(w => w.chain === 'solana');
+  const solanaWallets = allWallets.filter(w => isSolanaWallet(w));
   // Sweep destination: the designated treasury if it's on the sweep chain,
   // otherwise an explicit pick (never silently send to a wrong-chain wallet).
   const sweepDestination: ManagedWallet | null = isSolanaMode
-    ? (solanaWallets.find(w => w.id === (solDestinationId || (mainWallet.chain === 'solana' ? mainWallet.id : ''))) || null)
+    ? (solanaWallets.find(w => w.id === (solDestinationId || (isSolanaWallet(mainWallet) ? mainWallet.id : ''))) || null)
     : mainWallet;
 
   const candidateWallets = (sourceWallets && sourceWallets.length > 0 ? sourceWallets : allWallets)
     // Chain filter: TON sweeps use TON wallets, Solana sweeps use Solana wallets.
     // Mixing chains feeds a Solana mnemonic into the TON signer (or vice versa).
-    .filter(w => isSolanaMode ? w.chain === 'solana' : (!w.chain || w.chain === 'ton'))
+    .filter(w => isSolanaMode ? isSolanaWallet(w) : !isSolanaWallet(w))
     .filter(w => !sweepDestination || w.id !== sweepDestination.id);
   // Reserve must cover the real on-chain fee. TON ~0.0104–0.02; Solana 0.000005.
   const minFee = isSolanaMode ? 0.00001 : (selectedToken === 'TON' ? 0.02 : 0.05);

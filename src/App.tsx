@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { ManagedWallet, Network, VaultConfig, NFTItem } from './types';
+import { isSolanaWallet } from './types';
 import { TonService, SAMPLE_POPULAR_NFTS } from './services/tonService';
 import { SolanaService } from './services/solanaService';
 import { StorageService, normalizeWallets } from './services/storageService';
@@ -49,7 +50,7 @@ export function App() {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [refreshProgress, setRefreshProgress] = useState<{ done: number; total: number } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastTimeoutRef = useState<{ timer?: any }>({})[0];
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Active Modals
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState<boolean>(false);
@@ -127,11 +128,11 @@ export function App() {
     showToast(`Initiating transfer of ${tokenSymbol}`);
   };
 
-  const showToast = (msg: string) => {
-    if (toastTimeoutRef.timer) clearTimeout(toastTimeoutRef.timer);
+  const showToast = useCallback((msg: string) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setToastMessage(msg);
-    toastTimeoutRef.timer = setTimeout(() => setToastMessage(null), 3500);
-  };
+    toastTimeoutRef.current = setTimeout(() => setToastMessage(null), 3500);
+  }, []);
 
   const handleOpenNFTGallery = (walletId?: string) => {
     setNftGalleryWalletId(walletId);
@@ -211,7 +212,7 @@ export function App() {
         walletsRef.current = normalized;
         // Automatically fetch live on-chain balances on startup
         setTimeout(() => {
-          handleRefreshBalances(normalized, true);
+          handleRefreshBalancesRef.current?.(normalized, true);
         }, 150);
       }
     }
@@ -246,6 +247,8 @@ export function App() {
     showToast(`Switched view to TON ${newNet.toUpperCase()}`);
   };
 
+  const handleRefreshBalancesRef = useRef<((targetWallets?: ManagedWallet[] | unknown, silent?: boolean) => Promise<void>) | null>(null);
+
   // Refresh balances for all wallets (TON + Solana + Tokens)
   const handleRefreshBalances = useCallback(async (targetWallets?: ManagedWallet[] | unknown, silent = false) => {
     const list = Array.isArray(targetWallets) ? targetWallets : walletsRef.current;
@@ -257,8 +260,8 @@ export function App() {
     }
 
     try {
-      const solanaWallets = list.filter(w => w.chain === 'solana' || w.version === 'solana-ed25519' || w.version === 'squads-v4' || (w.address && !w.address.startsWith('EQ') && !w.address.startsWith('UQ') && !w.address.includes(':')));
-      const tonWallets = list.filter(w => !solanaWallets.some(sw => sw.id === w.id));
+      const solanaWallets = list.filter(w => isSolanaWallet(w));
+      const tonWallets = list.filter(w => !isSolanaWallet(w));
 
       let completed = 0;
       const trackWallet = (w: ManagedWallet) => {
@@ -309,7 +312,8 @@ export function App() {
       setIsRefreshing(false);
       setRefreshProgress(null);
     }
-  }, [network, isRefreshing]);
+  }, [network, isRefreshing, showToast]);
+  handleRefreshBalancesRef.current = handleRefreshBalances;
 
   // Periodic background refresh (45s) and tab-focus refresh (detects incoming transfers immediately)
   useEffect(() => {

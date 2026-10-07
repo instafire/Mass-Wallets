@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import type { ManagedWallet, Network } from "../types";
+import { isSolanaWallet } from "../types";
 import { WalletCard } from "./WalletCard";
 import { QuickQRPopover } from "./QuickQRPopover";
 import { BatchTagModal } from "./BatchTagModal";
@@ -166,7 +167,7 @@ export const WalletList: React.FC<WalletListProps> = ({
       if (!matchesSearch) return false;
 
       if (selectedChain !== "all") {
-        const isSol = w.chain === "solana" || w.version === "solana-ed25519" || w.version === "squads-v4";
+        const isSol = isSolanaWallet(w);
         if (selectedChain === "solana" && !isSol) return false;
         if (selectedChain === "ton" && isSol) return false;
       }
@@ -296,19 +297,27 @@ export const WalletList: React.FC<WalletListProps> = ({
     setIsRangeSelectorOpen(false);
   };
 
-  // Export the currently selected wallets as CSV. Includes seed phrases by
-  // design (it's a backup format) — the filename and confirm dialog say so.
+  // Export the currently selected wallets as CSV with formula-injection protection.
   const handleExportSelectedCsv = () => {
     const selected = wallets.filter(w => selectedIds.has(w.id));
     if (selected.length === 0) return;
     if (!confirm(`Export ${selected.length} wallet(s) to CSV?\n\nThe file WILL contain seed phrases in plain text. Store it somewhere safe.`)) return;
 
-    const q = (v: string) => `"${(v || '').replace(/"/g, '""')}"`;
+    const escapeCsv = (v: string | number) => {
+      const str = String(v ?? '');
+      const sanitized = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+      return `"${sanitized.replace(/"/g, '""')}"`;
+    };
+
     const rows = [
       ['label', 'tag', 'chain', 'address', 'balance', 'mnemonic'].join(','),
       ...selected.map(w => [
-        q(w.label), q(w.tag), q(w.chain || 'ton'), q(w.address), q(w.balance || '0'),
-        q(Array.isArray(w.mnemonic) ? w.mnemonic.join(' ') : ''),
+        escapeCsv(w.label),
+        escapeCsv(w.tag),
+        escapeCsv(w.chain || 'ton'),
+        escapeCsv(w.address),
+        escapeCsv(w.balance || '0'),
+        escapeCsv(Array.isArray(w.mnemonic) ? w.mnemonic.join(' ') : ''),
       ].join(',')),
     ];
     const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -334,7 +343,7 @@ export const WalletList: React.FC<WalletListProps> = ({
 
   const handleJumpToIndex = (e: React.FormEvent) => {
     e.preventDefault();
-    const idx = parseInt(jumpIndex);
+    const idx = parseInt(jumpIndex, 10);
     if (isNaN(idx) || idx < 1 || idx > wallets.length) return;
     
     const targetWallet = wallets[idx - 1];

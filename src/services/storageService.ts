@@ -1,5 +1,6 @@
 import CryptoJS from 'crypto-js';
 import type { ManagedWallet, VaultConfig, WalletBackupExport, Network, NetworkBalanceData } from '../types';
+import { isSolanaWallet } from '../types';
 
 const STORAGE_KEY_WALLETS = 'tonkeeper_mass_wallets_v2';
 const STORAGE_KEY_BACKUP_ALT = 'tonkeeper_mass_wallets_backup_v2';
@@ -277,13 +278,7 @@ export function normalizeWallet(w: any): ManagedWallet {
   const activeJettons = Array.isArray(w.jettons) ? w.jettons : (mainnetData.jettons || []);
   const activeNfts = Array.isArray(w.nfts) ? w.nfts : (mainnetData.nfts || []);
 
-  const detectedChain = w.chain || (
-    w.version === 'solana-ed25519' || 
-    w.version === 'squads-v4' || 
-    (w.address && !w.address.startsWith('EQ') && !w.address.startsWith('UQ') && !w.address.includes(':'))
-      ? 'solana' 
-      : 'ton'
-  );
+  const detectedChain = w.chain || (isSolanaWallet(w) ? 'solana' : 'ton');
 
   return {
     id: w.id || `w_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -601,6 +596,7 @@ export class StorageService {
   }
 
   public static clearAllWallets(): void {
+    clearSessionPin();
     for (const key of LEGACY_STORAGE_KEYS) {
       localStorage.removeItem(key);
     }
@@ -782,22 +778,29 @@ export class StorageService {
   }
 
   /**
-   * Export Managed Wallets to CSV
+   * Export Managed Wallets to CSV with CSV-injection (formula/DDE) protection.
    */
   public static exportToCSV(wallets: ManagedWallet[], filename: string = `wallets_${Date.now()}.csv`): void {
+    const escapeCsv = (val: string | number): string => {
+      const str = String(val ?? '');
+      // Prevent formula injection in spreadsheet software (Excel, LibreOffice)
+      const sanitized = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+      return `"${sanitized.replace(/"/g, '""')}"`;
+    };
+
     const headers = ['Index', 'Chain', 'Label', 'Tag', 'Address', 'Version', 'Private Key (Base58)', 'Squads v4 Vault', 'Keyphrase', 'Public Key', 'Created At'];
     const rows = wallets.map((w, idx) => [
       idx + 1,
-      `"${w.chain || 'ton'}"`,
-      `"${w.label.replace(/"/g, '""')}"`,
-      `"${w.tag.replace(/"/g, '""')}"`,
-      `"${w.address}"`,
-      `"${w.version}"`,
-      `"${(w.privateKey || '').replace(/"/g, '""')}"`,
-      `"${(w.squadsVaultAddress || '').replace(/"/g, '""')}"`,
-      `"${w.mnemonic.join(' ')}"`,
-      `"${w.publicKey}"`,
-      `"${new Date(w.createdAt).toLocaleString()}"`,
+      escapeCsv(w.chain || 'ton'),
+      escapeCsv(w.label),
+      escapeCsv(w.tag),
+      escapeCsv(w.address),
+      escapeCsv(w.version),
+      escapeCsv(w.privateKey || ''),
+      escapeCsv(w.squadsVaultAddress || ''),
+      escapeCsv(Array.isArray(w.mnemonic) ? w.mnemonic.join(' ') : ''),
+      escapeCsv(w.publicKey),
+      escapeCsv(new Date(w.createdAt).toLocaleString()),
     ]);
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');

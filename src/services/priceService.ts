@@ -73,96 +73,99 @@ export class PriceService {
 
     try {
       // 1. Try CoinGecko public API
-      const resp = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=the-open-network,solana,notcoin,dogs-2,bonk,jupiter-exchange-solana&vs_currencies=usd&include_24hr_change=true');
-      
-      let myaPrice = DEFAULT_PRICES.tokens.MYA;
       try {
-        const dsResp = await fetch('https://api.dexscreener.com/latest/dex/tokens/AdgYuCBng63wg8NRAAep57wZF6ptTi9hHoFFTEzwpump');
-        if (dsResp.ok) {
-          const dsData = await dsResp.json();
-          if (dsData.pairs && dsData.pairs.length > 0) {
-            const p = parseFloat(dsData.pairs[0].priceUsd);
-            if (!isNaN(p) && p > 0) {
-              myaPrice = p;
+        const resp = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=the-open-network,solana,notcoin,dogs-2,bonk,jupiter-exchange-solana&vs_currencies=usd&include_24hr_change=true');
+        
+        let myaPrice = DEFAULT_PRICES.tokens.MYA;
+        try {
+          const dsResp = await fetch('https://api.dexscreener.com/latest/dex/tokens/AdgYuCBng63wg8NRAAep57wZF6ptTi9hHoFFTEzwpump');
+          if (dsResp.ok) {
+            const dsData = await dsResp.json();
+            if (dsData.pairs && dsData.pairs.length > 0) {
+              const p = parseFloat(dsData.pairs[0].priceUsd);
+              if (!isNaN(p) && p > 0) {
+                myaPrice = p;
+              }
             }
           }
+        } catch {}
+
+        if (resp.ok) {
+          const data = await resp.json();
+          const tonPrice = data['the-open-network']?.usd || this.currentPrices.tonUsd || DEFAULT_PRICES.tonUsd;
+          const tonChange = data['the-open-network']?.usd_24h_change ?? this.currentPrices.change24h ?? DEFAULT_PRICES.change24h;
+          const solPrice = data['solana']?.usd || this.currentPrices.solUsd || DEFAULT_PRICES.solUsd;
+          const solChange = data['solana']?.usd_24h_change ?? this.currentPrices.change24hSol ?? DEFAULT_PRICES.change24hSol;
+          const notPrice = data['notcoin']?.usd || DEFAULT_PRICES.tokens.NOT;
+          const dogsPrice = data['dogs-2']?.usd || DEFAULT_PRICES.tokens.DOGS;
+          const bonkPrice = data['bonk']?.usd || DEFAULT_PRICES.tokens.BONK;
+          const jupPrice = data['jupiter-exchange-solana']?.usd || DEFAULT_PRICES.tokens.JUP;
+
+          this.currentPrices = {
+            tonUsd: tonPrice,
+            change24h: tonChange,
+            solUsd: solPrice,
+            change24hSol: solChange,
+            tokens: {
+              ...DEFAULT_PRICES.tokens,
+              TON: tonPrice,
+              SOL: solPrice,
+              USDT: 1.00,
+              USDC: 1.00,
+              NOT: notPrice,
+              DOGS: dogsPrice,
+              BONK: bonkPrice,
+              JUP: jupPrice,
+              MYA: myaPrice,
+            },
+            lastUpdated: Date.now(),
+            source: 'live',
+          };
+
+          this.listeners.forEach(fn => fn(this.currentPrices));
+          return this.currentPrices;
+        }
+      } catch {
+        // Proceed to fallback
+      }
+
+      // 2. Fallback to Binance ticker if CoinGecko is rate-limited or unavailable
+      try {
+        const bResp = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=[%22TONUSDT%22,%22SOLUSDT%22]');
+        if (bResp.ok) {
+          const bData = await bResp.json();
+          const tonItem = Array.isArray(bData) ? bData.find((x: any) => x.symbol === 'TONUSDT') : null;
+          const solItem = Array.isArray(bData) ? bData.find((x: any) => x.symbol === 'SOLUSDT') : null;
+          const tonPrice = tonItem ? parseFloat(tonItem.lastPrice) : this.currentPrices.tonUsd;
+          const tonChange = tonItem ? parseFloat(tonItem.priceChangePercent) : this.currentPrices.change24h;
+          const solPrice = solItem ? parseFloat(solItem.lastPrice) : this.currentPrices.solUsd;
+          const solChange = solItem ? parseFloat(solItem.priceChangePercent) : this.currentPrices.change24hSol;
+
+          this.currentPrices = {
+            tonUsd: tonPrice,
+            change24h: tonChange,
+            solUsd: solPrice,
+            change24hSol: solChange,
+            tokens: {
+              ...this.currentPrices.tokens,
+              TON: tonPrice,
+              SOL: solPrice,
+            },
+            lastUpdated: Date.now(),
+            source: 'live',
+          };
+          this.listeners.forEach(fn => fn(this.currentPrices));
+          return this.currentPrices;
         }
       } catch {}
 
-      if (resp.ok) {
-        const data = await resp.json();
-        const tonPrice = data['the-open-network']?.usd || this.currentPrices.tonUsd || DEFAULT_PRICES.tonUsd;
-        const tonChange = data['the-open-network']?.usd_24h_change ?? this.currentPrices.change24h ?? DEFAULT_PRICES.change24h;
-        const solPrice = data['solana']?.usd || this.currentPrices.solUsd || DEFAULT_PRICES.solUsd;
-        const solChange = data['solana']?.usd_24h_change ?? this.currentPrices.change24hSol ?? DEFAULT_PRICES.change24hSol;
-        const notPrice = data['notcoin']?.usd || DEFAULT_PRICES.tokens.NOT;
-        const dogsPrice = data['dogs-2']?.usd || DEFAULT_PRICES.tokens.DOGS;
-        const bonkPrice = data['bonk']?.usd || DEFAULT_PRICES.tokens.BONK;
-        const jupPrice = data['jupiter-exchange-solana']?.usd || DEFAULT_PRICES.tokens.JUP;
-
-        this.currentPrices = {
-          tonUsd: tonPrice,
-          change24h: tonChange,
-          solUsd: solPrice,
-          change24hSol: solChange,
-          tokens: {
-            ...DEFAULT_PRICES.tokens,
-            TON: tonPrice,
-            SOL: solPrice,
-            USDT: 1.00,
-            USDC: 1.00,
-            NOT: notPrice,
-            DOGS: dogsPrice,
-            BONK: bonkPrice,
-            JUP: jupPrice,
-            MYA: myaPrice,
-          },
-          lastUpdated: Date.now(),
-          source: 'live',
-        };
-
-        this.listeners.forEach(fn => fn(this.currentPrices));
-        return this.currentPrices;
-      }
-    } catch {
-      // Proceed to fallback
+      // 3. If all requests failed, mark stale
+      this.currentPrices = { ...this.currentPrices, source: 'stale' };
+      this.listeners.forEach(fn => fn(this.currentPrices));
+      return this.currentPrices;
+    } finally {
+      this.isFetching = false;
     }
-
-    // 2. Fallback to Binance ticker if CoinGecko is rate-limited or unavailable
-    try {
-      const bResp = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=[%22TONUSDT%22,%22SOLUSDT%22]');
-      if (bResp.ok) {
-        const bData = await bResp.json();
-        const tonItem = Array.isArray(bData) ? bData.find((x: any) => x.symbol === 'TONUSDT') : null;
-        const solItem = Array.isArray(bData) ? bData.find((x: any) => x.symbol === 'SOLUSDT') : null;
-        const tonPrice = tonItem ? parseFloat(tonItem.lastPrice) : this.currentPrices.tonUsd;
-        const tonChange = tonItem ? parseFloat(tonItem.priceChangePercent) : this.currentPrices.change24h;
-        const solPrice = solItem ? parseFloat(solItem.lastPrice) : this.currentPrices.solUsd;
-        const solChange = solItem ? parseFloat(solItem.priceChangePercent) : this.currentPrices.change24hSol;
-
-        this.currentPrices = {
-          tonUsd: tonPrice,
-          change24h: tonChange,
-          solUsd: solPrice,
-          change24hSol: solChange,
-          tokens: {
-            ...this.currentPrices.tokens,
-            TON: tonPrice,
-            SOL: solPrice,
-          },
-          lastUpdated: Date.now(),
-          source: 'live',
-        };
-        this.listeners.forEach(fn => fn(this.currentPrices));
-        return this.currentPrices;
-      }
-    } catch {}
-
-    // 3. If all requests failed, mark stale
-    this.currentPrices = { ...this.currentPrices, source: 'stale' };
-    this.listeners.forEach(fn => fn(this.currentPrices));
-    this.isFetching = false;
-    return this.currentPrices;
   }
 
   public static formatUsd(amountInTonOrUsd: number, isTon = true): string {

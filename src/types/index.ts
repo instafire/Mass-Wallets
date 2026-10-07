@@ -74,6 +74,20 @@ export interface ManagedWallet {
   isMainWallet?: boolean;   // Designated Master Treasury Wallet
 }
 
+/**
+ * Robustly determines if a wallet belongs to the Solana blockchain.
+ * Checks chain flag, version (solana-ed25519 / squads-v4), or address format.
+ */
+export function isSolanaWallet(w?: Partial<ManagedWallet> | null): boolean {
+  if (!w) return false;
+  if (w.chain === 'solana') return true;
+  if (w.version === 'solana-ed25519' || w.version === 'squads-v4') return true;
+  if (w.address && !w.address.startsWith('EQ') && !w.address.startsWith('UQ') && !w.address.includes(':')) {
+    return true;
+  }
+  return false;
+}
+
 export interface JettonTokenInfo {
   symbol: string;
   name: string;

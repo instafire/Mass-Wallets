@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { ManagedWallet, Network } from '../types';
+import { isSolanaWallet } from '../types';
 import { TonService, SUPPORTED_JETTONS } from '../services/tonService';
 import { SolanaService, SUPPORTED_SOLANA_TOKENS } from '../services/solanaService';
 import confetti from 'canvas-confetti';
@@ -34,7 +35,7 @@ export const MainWalletDistributeModal: React.FC<MainWalletDistributeModalProps>
   network,
   onDistributionComplete,
 }) => {
-  const isSolana = mainWallet?.chain === 'solana' || mainWallet?.version === 'solana-ed25519' || mainWallet?.version === 'squads-v4';
+  const isSolana = isSolanaWallet(mainWallet);
   const [selectedToken, setSelectedToken] = useState<string>(isSolana ? 'SOL' : 'TON');
   const [distributionMode, setDistributionMode] = useState<'per-wallet' | 'total-pool'>('per-wallet');
   const [perWalletAmount, setPerWalletAmount] = useState<string>(isSolana ? '0.05' : '0.2');
@@ -49,6 +50,14 @@ export const MainWalletDistributeModal: React.FC<MainWalletDistributeModalProps>
   // Execution State
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [executionProgress, setExecutionProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+
+  useEffect(() => {
+    if (isSolana && selectedToken === 'TON') {
+      setSelectedToken('SOL');
+    } else if (!isSolana && selectedToken === 'SOL') {
+      setSelectedToken('TON');
+    }
+  }, [isSolana, selectedToken]);
 
   if (!isOpen || !mainWallet) return null;
 

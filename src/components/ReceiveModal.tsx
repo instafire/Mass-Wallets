@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { ManagedWallet, Network } from '../types';
+import { isSolanaWallet } from '../types';
 import { TonService } from '../services/tonService';
 import { QRCodeSVG } from 'qrcode.react';
 import { X, Copy, Check, ExternalLink, Download, Smartphone, ShieldCheck, Sparkles } from 'lucide-react';
@@ -28,7 +29,7 @@ export const ReceiveModal: React.FC<ReceiveModalProps> = ({
 
   if (!isOpen || !wallet) return null;
 
-  const isSolana = wallet.chain === 'solana' || wallet.version === 'solana-ed25519' || wallet.version === 'squads-v4';
+  const isSolana = isSolanaWallet(wallet);
   const hasVault = !!wallet.squadsVaultAddress;
   const targetAddress = (isSolana && useVaultPda && wallet.squadsVaultAddress) 
     ? wallet.squadsVaultAddress 

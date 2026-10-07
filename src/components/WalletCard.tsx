@@ -1,5 +1,6 @@
 import React, { useState, memo } from 'react';
 import type { ManagedWallet } from '../types';
+import { isSolanaWallet } from '../types';
 import { PriceService } from '../services/priceService';
 import { 
   Copy, 
@@ -43,7 +44,7 @@ const WalletCardComponent: React.FC<WalletCardProps> = ({
   const [copied, setCopied] = useState<boolean>(false);
   const [copiedVault, setCopiedVault] = useState<boolean>(false);
 
-  const isSolana = wallet.chain === 'solana' || wallet.version === 'solana-ed25519' || wallet.version === 'squads-v4' || !!wallet.privateKey;
+  const isSolana = isSolanaWallet(wallet) || !!wallet.privateKey;
   const shortAddress = `${wallet.address.substring(0, 6)}...${wallet.address.substring(wallet.address.length - 6)}`;
   const balanceNum = parseFloat(wallet.balance || '0');
 

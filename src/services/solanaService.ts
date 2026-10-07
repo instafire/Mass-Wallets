@@ -4,7 +4,7 @@ import {
   TOKEN_2022_PROGRAM_ID,
   getAssociatedTokenAddressSync, 
   createAssociatedTokenAccountInstruction, 
-  createTransferInstruction,
+  createTransferCheckedInstruction,
   unpackAccount
 } from '@solana/spl-token';
 import bs58 from 'bs58';
@@ -19,6 +19,33 @@ import type {
   JettonBalance, 
   JettonTokenInfo 
 } from '../types';
+
+/** Format raw atomic bigint token amounts to human-readable string without float precision loss */
+export function formatBigIntUnits(raw: bigint, decimals: number): string {
+  if (decimals === 0) return raw.toString();
+  const sign = raw < 0n ? '-' : '';
+  const abs = raw < 0n ? -raw : raw;
+  const s = abs.toString().padStart(decimals + 1, '0');
+  const intPart = s.slice(0, s.length - decimals);
+  const fracPart = s.slice(s.length - decimals).replace(/0+$/, '');
+  return fracPart.length > 0 ? `${sign}${intPart}.${fracPart}` : `${sign}${intPart}`;
+}
+
+/** Parse human-readable or exponential numbers/strings into exact bigint atomic units */
+export function parseTokenUnits(amount: number | string, decimals: number): bigint {
+  const str = String(amount).trim();
+  if (str.includes('e') || str.includes('E')) {
+    const num = Number(str);
+    if (!Number.isFinite(num) || num <= 0) return 0n;
+    const fixed = num.toFixed(decimals);
+    const [intP, fracP = ''] = fixed.split('.');
+    const fracPadded = (fracP + '0'.repeat(decimals)).slice(0, decimals);
+    return BigInt(intP.replace(/\D/g, '') || '0') * (10n ** BigInt(decimals)) + BigInt(fracPadded.replace(/\D/g, '') || '0');
+  }
+  const [amtInt = '0', amtFrac = ''] = str.split('.');
+  const amtFracPadded = (amtFrac + '0'.repeat(decimals)).slice(0, decimals);
+  return BigInt(amtInt.replace(/\D/g, '') || '0') * (10n ** BigInt(decimals)) + BigInt(amtFracPadded.replace(/\D/g, '') || '0');
+}
 
 // Squads Protocol v4 Program ID (Verified Mainnet & Devnet)
 export const SQUADS_V4_PROGRAM_ID = squads.PROGRAM_ID;
@@ -457,7 +484,7 @@ export class SolanaService {
             balanceNano: lamports.toString(),
           });
         });
-      } catch (e) {
+      } catch {
         try {
           const fallbackConn = this.getFallbackConnection(network);
           const publicKeys = chunk.map(a => new PublicKey(a));
@@ -512,12 +539,9 @@ export class SolanaService {
       const senderKeypair = await this.getKeypair(senderWallet);
       const recipientPubkey = new PublicKey(recipientAddress);
 
-      // Integer string math for lamports (9 decimals) — never float-multiply.
-      const [solInt = '0', solFrac = ''] = String(amountSol).trim().split('.');
-      const solFracPadded = (solFrac + '0'.repeat(9)).slice(0, 9);
-      const lamportsToSend = Number(
-        BigInt(solInt.replace(/\D/g, '') || '0') * 1000000000n + BigInt(solFracPadded.replace(/\D/g, '') || '0')
-      );
+      // Safe exact integer math for lamports (9 decimals) — handles scientific notation & arbitrary precision
+      const rawLamports = parseTokenUnits(amountSol, 9);
+      const lamportsToSend = Number(rawLamports);
       if (!Number.isSafeInteger(lamportsToSend) || lamportsToSend <= 0) {
         throw new Error('Invalid transfer amount: ' + amountSol);
       }
@@ -667,8 +691,7 @@ export class SolanaService {
           if (acc) {
             try {
               const unpacked = unpackAccount(item.ata, acc, item.programId);
-              const rawAmount = unpacked.amount;
-              uiAmount = (Number(rawAmount) / Math.pow(10, item.tokenInfo.decimals)).toString();
+              uiAmount = formatBigIntUnits(unpacked.amount, item.tokenInfo.decimals);
             } catch (err) {
               console.warn(`Error unpacking ATA ${item.ata.toBase58()}:`, err);
             }
@@ -690,7 +713,7 @@ export class SolanaService {
           });
           resultMap.set(item.walletAddress, currentList);
         });
-      } catch (e) {
+      } catch {
         try {
           const fallbackConn = this.getFallbackConnection(network);
           const publicKeys = chunk.map(item => item.ata);
@@ -702,8 +725,7 @@ export class SolanaService {
             if (acc) {
               try {
                 const unpacked = unpackAccount(item.ata, acc, item.programId);
-                const rawAmount = unpacked.amount;
-                uiAmount = (Number(rawAmount) / Math.pow(10, item.tokenInfo.decimals)).toString();
+                uiAmount = formatBigIntUnits(unpacked.amount, item.tokenInfo.decimals);
               } catch (err) {
                 console.warn(`Error unpacking ATA ${item.ata.toBase58()}:`, err);
               }
@@ -938,21 +960,21 @@ export class SolanaService {
         );
       }
 
-      // Convert amount to atomic units with integer string math (never float).
-      const [amtInt = '0', amtFrac = ''] = String(amountTokens).trim().split('.');
-      const amtFracPadded = (amtFrac + '0'.repeat(decimals)).slice(0, decimals);
-      const rawAmount = BigInt((amtInt.replace(/\D/g, '') || '0')) * (10n ** BigInt(decimals))
-        + BigInt(amtFracPadded.replace(/\D/g, '') || '0');
-      if (rawAmount <= BigInt(0)) {
+      // Convert amount to atomic units with exact integer math (handles exponential & scientific notation)
+      const rawAmount = parseTokenUnits(amountTokens, decimals);
+      if (rawAmount <= 0n) {
         throw new Error('Invalid token amount: ' + amountTokens);
       }
 
+      // Use createTransferCheckedInstruction for 100% Token-2022 and classic SPL compatibility
       tx.add(
-        createTransferInstruction(
+        createTransferCheckedInstruction(
           senderAta,
+          mintPubkey,
           recipientAta,
           senderKeypair.publicKey,
           rawAmount,
+          decimals,
           [],
           tokenProgramId
         )

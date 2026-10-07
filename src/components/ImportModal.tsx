@@ -177,7 +177,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         // made Solana funds "disappear". Require an explicit chain choice.
         if (targetChain === 'auto') {
           const hasMnemonicLine = lines.some(l => {
-            const w = l.replace(/^\d+[\.\)]\s*/, '').split(/\s+/).filter(x => x.length > 0);
+            const w = l.replace(/^\d+[.)]\s*/, '').split(/\s+/).filter(x => x.length > 0);
             return w.length === 12 || w.length === 24;
           });
           if (hasMnemonicLine) {
@@ -214,7 +214,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           }
 
           // Case B: Seed words
-          const cleanedLine = line.replace(/^\d+[\.\)]\s*/, '');
+          const cleanedLine = line.replace(/^\d+[.)]\s*/, '');
           const words = cleanedLine.split(/\s+/).map(w => w.trim().toLowerCase()).filter(w => w.length > 0);
 
           if (words.length === 12 || words.length === 24) {
