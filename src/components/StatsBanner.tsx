@@ -37,9 +37,25 @@ export const StatsBanner: React.FC<StatsBannerProps> = ({ wallets, network: _net
 
   const tonUsdValuation = totalTonBalance * (priceData.tonUsd || 0);
   const solUsdValuation = totalSolBalance * (priceData.solUsd || 154.20);
-  const totalUsdValuation = tonUsdValuation + solUsdValuation;
+  
+  // Calculate token USD valuations across all wallets
+  const tokensUsdValuation = wallets.reduce((acc, w) => {
+    const wJettons = w.jettons || [];
+    return acc + wJettons.reduce((jAcc, j) => {
+      const bal = parseFloat(j.balance || '0');
+      if (bal <= 0) return jAcc;
+      const price = priceData.tokens[j.symbol.toUpperCase()] || 0;
+      return jAcc + (bal * price);
+    }, 0);
+  }, 0);
 
-  const nonZeroWallets = wallets.filter(w => parseFloat(w.balance || '0') > 0).length;
+  const totalUsdValuation = tonUsdValuation + solUsdValuation + tokensUsdValuation;
+
+  const isWalletFunded = (w: ManagedWallet) => {
+    if (parseFloat(w.balance || '0') > 0) return true;
+    return !!w.jettons?.some(j => parseFloat(j.balance || '0') > 0);
+  };
+  const nonZeroWallets = wallets.filter(isWalletFunded).length;
   const gasReadyWallets = tonWallets.filter(w => parseFloat(w.balance || '0') >= 0.005).length;
   const lowGasWallets = tonWallets.filter(w => {
     const b = parseFloat(w.balance || '0');

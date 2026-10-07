@@ -108,8 +108,21 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
   const isSolana = mainWallet.chain === 'solana' || mainWallet.version === 'solana-ed25519' || mainWallet.version === 'squads-v4';
   const shortAddress = `${mainWallet.address.substring(0, 8)}...${mainWallet.address.substring(mainWallet.address.length - 6)}`;
   const treasuryBalNum = parseFloat(mainWallet.balance || '0');
-  const treasuryUsdVal = isSolana ? (treasuryBalNum * (priceData.solUsd || 154.20)) : (treasuryBalNum * (priceData.tonUsd || 5.42));
+  const treasuryNativeUsdVal = isSolana ? (treasuryBalNum * (priceData.solUsd || 154.20)) : (treasuryBalNum * (priceData.tonUsd || 5.42));
   const estimatedGas = isSolana ? recipientCount * 0.000005 : recipientCount * 0.002;
+
+  // Filter secondary jettons / SPL tokens that have positive balances
+  const activeTokens = mainWallet.jettons?.filter(j => parseFloat(j.balance || '0') > 0 && j.symbol !== 'TON' && j.symbol !== 'SOL') || [];
+  
+  // Calculate total USD value (Native SOL/TON + All Held Tokens)
+  const tokensUsdVal = activeTokens.reduce((sum, t) => {
+    const bal = parseFloat(t.balance || '0');
+    const tokenPrice = isSolana
+      ? (SUPPORTED_SOLANA_TOKENS.find(s => s.symbol === t.symbol)?.usdPrice || priceData.tokens[t.symbol.toUpperCase()] || 0)
+      : (priceData.tokens[t.symbol.toUpperCase()] || 0);
+    return sum + (bal * tokenPrice);
+  }, 0);
+  const totalTreasuryUsdVal = treasuryNativeUsdVal + tokensUsdVal;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-4">
@@ -159,20 +172,32 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
                 <span className="font-semibold text-gray-300">Vault Assets:</span>
               </div>
               {isSolana ? (
-                SUPPORTED_SOLANA_TOKENS.slice(1, 5).map(s => {
-                  const heldToken = mainWallet.jettons?.find(x => x.symbol === s.symbol);
-                  const bal = heldToken ? parseFloat(heldToken.balance || '0') : 0;
-                  return (
+                <>
+                  {activeTokens.map(t => (
+                    <span 
+                      key={t.symbol} 
+                      className="inline-flex items-center gap-1 bg-amber-500/15 text-[11px] font-mono px-2 py-0.5 rounded-lg border border-amber-500/40 text-amber-300 font-bold shadow-sm"
+                      title={t.name}
+                    >
+                      <span>{t.icon || '🪙'}</span>
+                      <span>{parseFloat(t.balance || '0').toLocaleString()}</span>
+                      <span className="text-amber-400 text-[10px]">{t.symbol}</span>
+                      {t.jettonAddress?.endsWith('pump') && (
+                        <span className="text-[8px] bg-emerald-500/20 text-emerald-300 px-1 rounded ml-0.5">pump</span>
+                      )}
+                    </span>
+                  ))}
+                  {SUPPORTED_SOLANA_TOKENS.filter(s => s.symbol !== 'SOL' && !activeTokens.some(at => at.symbol === s.symbol)).slice(0, 3).map(s => (
                     <span 
                       key={s.symbol} 
-                      className="inline-flex items-center gap-1 bg-[#070a14] text-[11px] font-mono px-2 py-0.5 rounded-lg border border-white/5 text-gray-300"
+                      className="inline-flex items-center gap-1 bg-[#070a14] text-[11px] font-mono px-2 py-0.5 rounded-lg border border-white/5 text-gray-400"
                     >
                       <span>{s.icon}</span>
-                      <span className="font-bold">{bal > 0 ? bal.toLocaleString() : '0.00'}</span>
+                      <span className="font-bold">0.00</span>
                       <span className="text-gray-500 text-[10px]">{s.symbol}</span>
                     </span>
-                  );
-                })
+                  ))}
+                </>
               ) : (
                 SUPPORTED_JETTONS.slice(0, 4).map(j => {
                   const heldJetton = mainWallet.jettons?.find(x => x.symbol === j.symbol);
@@ -180,7 +205,7 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
                   return (
                     <span 
                       key={j.symbol} 
-                      className="inline-flex items-center gap-1 bg-[#070a14] text-[11px] font-mono px-2 py-0.5 rounded-lg border border-white/5 text-gray-300"
+                      className={`inline-flex items-center gap-1 ${bal > 0 ? 'bg-amber-500/15 text-amber-300 border-amber-500/40 font-bold' : 'bg-[#070a14] text-gray-300 border-white/5'} text-[11px] font-mono px-2 py-0.5 rounded-lg border`}
                     >
                       <span>{j.icon}</span>
                       <span className="font-bold">{bal > 0 ? bal.toLocaleString() : '0.00'}</span>
@@ -224,8 +249,26 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
               <span className="text-xs text-gray-300 font-bold">{isSolana ? 'SOL' : 'TON'}</span>
             </div>
             <p className="text-xs text-emerald-400/90 font-mono font-bold mt-0.5">
-              ≈ {isSolana ? PriceService.formatSolUsd(treasuryUsdVal) : PriceService.formatUsd(treasuryUsdVal, false)}
+              ≈ {isSolana ? PriceService.formatSolUsd(totalTreasuryUsdVal) : PriceService.formatUsd(totalTreasuryUsdVal, false)}
             </p>
+            {activeTokens.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-white/10 flex flex-wrap gap-1.5 items-center justify-center sm:justify-start">
+                {activeTokens.map(t => (
+                  <span
+                    key={t.symbol}
+                    className="inline-flex items-center gap-1 bg-[#121b30] px-2 py-0.5 rounded-lg border border-amber-500/30 text-xs font-mono text-amber-300 font-bold shadow-sm"
+                  >
+                    <span>{t.icon || '🪙'}</span>
+                    <span>{parseFloat(t.balance || '0').toLocaleString()} {t.symbol}</span>
+                    {t.jettonAddress?.endsWith('pump') && (
+                      <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1 rounded border border-emerald-500/30 font-sans">
+                        pump.fun
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
             {mainWallet.nfts && mainWallet.nfts.length > 0 && (
               <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between gap-2">
                 <span className="text-[11px] text-purple-300 font-semibold flex items-center gap-1">

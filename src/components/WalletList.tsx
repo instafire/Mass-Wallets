@@ -134,8 +134,13 @@ export const WalletList: React.FC<WalletListProps> = ({
     return Array.from(set);
   }, [wallets]);
 
-  const fundedCount = useMemo(() => wallets.filter(w => parseFloat(w.balance || "0") > 0).length, [wallets]);
-  const emptyCount = useMemo(() => wallets.filter(w => parseFloat(w.balance || "0") <= 0 && !w.isMainWallet).length, [wallets]);
+  const isWalletFunded = (w: ManagedWallet) => {
+    if (parseFloat(w.balance || "0") > 0) return true;
+    return !!w.jettons?.some(j => parseFloat(j.balance || "0") > 0);
+  };
+
+  const fundedCount = useMemo(() => wallets.filter(isWalletFunded).length, [wallets]);
+  const emptyCount = useMemo(() => wallets.filter(w => !isWalletFunded(w) && !w.isMainWallet).length, [wallets]);
   // Low gas = balance > 0 and < 0.005 TON (excluding main treasury)
   const lowGasCount = useMemo(() => wallets.filter(w => { const b = parseFloat(w.balance || "0"); return b > 0 && b < 0.005 && !w.isMainWallet; }).length, [wallets]);
   const nftWalletsCount = useMemo(() => wallets.filter(w => w.nfts && w.nfts.length > 0).length, [wallets]);
@@ -175,8 +180,9 @@ export const WalletList: React.FC<WalletListProps> = ({
       if (selectedVersion !== "all" && w.version !== selectedVersion) return false;
 
       const bal = parseFloat(w.balance || "0");
-      if (filterOption === "funded" && bal <= 0) return false;
-      if (filterOption === "empty" && bal > 0) return false;
+      const funded = isWalletFunded(w);
+      if (filterOption === "funded" && !funded) return false;
+      if (filterOption === "empty" && funded) return false;
       if (filterOption === "low-gas" && (bal <= 0 || bal >= 0.005 || w.isMainWallet)) return false;
       if (filterOption === "nfts" && (!w.nfts || w.nfts.length === 0)) return false;
       if (filterOption === "treasury" && !w.isMainWallet) return false;

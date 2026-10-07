@@ -4,7 +4,8 @@ import {
   TOKEN_2022_PROGRAM_ID,
   getAssociatedTokenAddressSync, 
   createAssociatedTokenAccountInstruction, 
-  createTransferInstruction 
+  createTransferInstruction,
+  unpackAccount
 } from '@solana/spl-token';
 import bs58 from 'bs58';
 import * as bip39 from 'bip39';
@@ -231,6 +232,15 @@ export class SolanaService {
     const squadsAccounts = this.deriveSquadsV4Accounts(pubkey);
 
     const defaultTokens: JettonBalance[] = [
+      {
+        symbol: 'MYA',
+        name: 'askmya (pump.fun)',
+        balance: '0.00',
+        decimals: 6,
+        jettonAddress: 'AdgYuCBng63wg8NRAAep57wZF6ptTi9hHoFFTEzwpump',
+        icon: '💊',
+        usdValue: '$0.00',
+      },
       {
         symbol: 'USDC',
         name: 'USD Coin',
@@ -570,11 +580,100 @@ export class SolanaService {
   }
 
   /**
-   * Fetch all on-chain SPL Token accounts owned by an address
+   * Fast, rate-limit immune bulk token balances for a list of wallets using getMultipleAccountsInfo.
+   * Derives ATAs offline for known tokens and queries in 100-account batches.
    */
+  public static async fetchKnownTokensBulk(
+    wallets: ManagedWallet[],
+    network: Network = 'mainnet'
+  ): Promise<Map<string, JettonBalance[]>> {
+    const resultMap = new Map<string, JettonBalance[]>();
+    wallets.forEach(w => resultMap.set(w.address, []));
+    if (wallets.length === 0) return resultMap;
+
+    const connection = this.getConnection(network);
+    const tokensToCheck = SUPPORTED_SOLANA_TOKENS.filter(t => t.symbol !== 'SOL');
+    const prices = PriceService.getPrices();
+
+    interface AtaItem {
+      walletAddress: string;
+      ata: PublicKey;
+      programId: PublicKey;
+      tokenInfo: JettonTokenInfo;
+    }
+    const ataItems: AtaItem[] = [];
+
+    for (const w of wallets) {
+      try {
+        const ownerPubkey = new PublicKey(w.address);
+        for (const token of tokensToCheck) {
+          const is2022 = token.masterAddress.endsWith('pump') || token.symbol === 'MYA';
+          const programId = is2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+          const ata = getAssociatedTokenAddressSync(
+            new PublicKey(token.masterAddress),
+            ownerPubkey,
+            true,
+            programId
+          );
+          ataItems.push({
+            walletAddress: w.address,
+            ata,
+            programId,
+            tokenInfo: token,
+          });
+        }
+      } catch (e) {
+        console.warn(`Error deriving ATAs for wallet ${w.address}:`, e);
+      }
+    }
+
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < ataItems.length; i += CHUNK_SIZE) {
+      const chunk = ataItems.slice(i, i + CHUNK_SIZE);
+      try {
+        const publicKeys = chunk.map(item => item.ata);
+        const accounts = await connection.getMultipleAccountsInfo(publicKeys);
+
+        accounts.forEach((acc, idx) => {
+          const item = chunk[idx];
+          let uiAmount = '0.00';
+          if (acc) {
+            try {
+              const unpacked = unpackAccount(item.ata, acc, item.programId);
+              const rawAmount = unpacked.amount;
+              uiAmount = (Number(rawAmount) / Math.pow(10, item.tokenInfo.decimals)).toString();
+            } catch (err) {
+              console.warn(`Error unpacking ATA ${item.ata.toBase58()}:`, err);
+            }
+          }
+
+          const balNum = parseFloat(uiAmount);
+          const price = item.tokenInfo.usdPrice || (prices.tokens[item.tokenInfo.symbol.toUpperCase()] || 0);
+          const usdVal = balNum * price;
+
+          const currentList = resultMap.get(item.walletAddress) || [];
+          currentList.push({
+            symbol: item.tokenInfo.symbol,
+            name: item.tokenInfo.name,
+            balance: balNum > 0 ? uiAmount : '0.00',
+            decimals: item.tokenInfo.decimals,
+            jettonAddress: item.tokenInfo.masterAddress,
+            icon: item.tokenInfo.icon,
+            usdValue: PriceService.formatUsd(usdVal, false),
+          });
+          resultMap.set(item.walletAddress, currentList);
+        });
+      } catch (e) {
+        console.warn(`Error batch-fetching Solana ATAs chunk ${i}:`, e);
+      }
+    }
+
+    return resultMap;
+  }
+
   /**
-   * Returns null when the fetch fails so callers keep the last known token
-   * list instead of wiping it.
+   * Fetch all on-chain SPL Token accounts owned by an address
+   * Returns null when the fetch fails so callers keep the last known token list.
    */
   public static async fetchSplTokens(
     addressStr: string,
@@ -592,6 +691,27 @@ export class SolanaService {
           programId: TOKEN_2022_PROGRAM_ID,
         }),
       ]);
+
+      // If both RPC calls failed (e.g. 429 rate limit), fall back to known ATA direct fetch
+      if (classicRes.status === 'rejected' && token2022Res.status === 'rejected') {
+        const dummyWallet: ManagedWallet = {
+          id: 'temp',
+          address: addressStr,
+          chain: 'solana',
+          label: '',
+          version: 'solana-ed25519',
+          tag: '',
+          subwalletId: 0,
+          rawAddress: addressStr,
+          publicKey: addressStr,
+          mnemonic: [],
+          createdAt: 0,
+          balance: '0',
+          balanceNano: '0',
+        };
+        const bulkMap = await this.fetchKnownTokensBulk([dummyWallet], network);
+        return bulkMap.get(addressStr) || null;
+      }
 
       const allAccounts: any[] = [];
       if (classicRes.status === 'fulfilled') {
@@ -638,7 +758,27 @@ export class SolanaService {
       return results;
     } catch (err) {
       console.warn(`Error fetching SPL tokens for ${addressStr}:`, err);
-      return null;
+      try {
+        const dummyWallet: ManagedWallet = {
+          id: 'temp',
+          address: addressStr,
+          chain: 'solana',
+          label: '',
+          version: 'solana-ed25519',
+          tag: '',
+          subwalletId: 0,
+          rawAddress: addressStr,
+          publicKey: addressStr,
+          mnemonic: [],
+          createdAt: 0,
+          balance: '0',
+          balanceNano: '0',
+        };
+        const bulkMap = await this.fetchKnownTokensBulk([dummyWallet], network);
+        return bulkMap.get(addressStr) || null;
+      } catch {
+        return null;
+      }
     }
   }
 
@@ -855,73 +995,97 @@ export class SolanaService {
     const updated = [...wallets];
     if (wallets.length === 0) return updated;
 
-    // 1. Fetch native SOL balances in bulk (chunks of 100)
+    // 1. Fetch native SOL balances in bulk via getMultipleAccountsInfo (100 per chunk)
     const addresses = wallets.map(w => w.address);
     const balanceMap = await this.fetchBalancesBulk(addresses, network);
 
-    // 2. Fetch SPL tokens in smaller concurrency chunks (5 wallets per batch)
-    const CHUNK_SIZE = 5;
+    // 2. Fetch known SPL & Token-2022 tokens in bulk via getMultipleAccountsInfo (immune to 429 rate limit)
+    const knownTokensMap = await this.fetchKnownTokensBulk(wallets, network);
+
+    // 3. For Master Treasury and custom imported wallets, attempt on-chain discovery for any unlisted tokens
+    const unlistedDiscoveryMap = new Map<string, JettonBalance[]>();
+    const priorityWallets = wallets.filter(w => w.isMainWallet || w.isCustomImport);
+    for (const pw of priorityWallets) {
+      try {
+        const discovered = await this.fetchSplTokens(pw.address, network);
+        if (discovered && discovered.length > 0) {
+          unlistedDiscoveryMap.set(pw.address, discovered);
+        }
+      } catch (e) {
+        console.warn(`Discovery fetch skipped for ${pw.address}:`, e);
+      }
+    }
+
+    // 4. Merge results per wallet and fire live callbacks
     let done = 0;
-    for (let i = 0; i < updated.length; i += CHUNK_SIZE) {
-      const chunk = updated.slice(i, i + CHUNK_SIZE);
+    for (let i = 0; i < updated.length; i++) {
+      const wallet = updated[i];
+      try {
+        const res = balanceMap.get(wallet.address);
+        if (!res) {
+          updated[i] = { ...updated[i], balanceStale: true };
+          if (onWalletUpdated) onWalletUpdated(updated[i]);
+          continue;
+        }
 
-      await Promise.all(
-        chunk.map(async (wallet, offset) => {
-          const index = i + offset;
-          try {
-            const res = balanceMap.get(wallet.address);
-            if (!res) {
-              // Bulk fetch missed this wallet (RPC chunk failed): keep last
-              // known balance, mark stale.
-              updated[index] = { ...updated[index], balanceStale: true };
-              if (onWalletUpdated) onWalletUpdated(updated[index]);
-              return;
-            }
-            const solBal = res.balance;
-            const solNano = res.balanceNano;
+        const solBal = res.balance;
+        const solNano = res.balanceNano;
 
-            // Fetch SPL tokens on-chain for this wallet (null = failed, keep old)
-            const splTokens = await this.fetchSplTokens(wallet.address, network);
-            const finalTokens = splTokens === null ? (updated[index].jettons || []) : splTokens;
+        // Known tokens from bulk ATA query
+        const knownTokens = knownTokensMap.get(wallet.address) || [];
 
-            const currentNetBalances = updated[index].networkBalances || {};
-            const updatedNetBalances = {
-              ...currentNetBalances,
-              [network]: {
-                ton: solBal,
-                tonNano: solNano,
-                jettons: finalTokens,
-                nfts: updated[index].nfts || [],
-              },
-            };
+        // Discovered tokens from on-chain account parsing (if any)
+        const discoveredTokens = unlistedDiscoveryMap.get(wallet.address) || [];
 
-            updated[index] = {
-              ...updated[index],
-              balance: solBal,
-              balanceNano: solNano,
-              jettons: finalTokens,
-              networkBalances: updatedNetBalances,
-              lastChecked: Date.now(),
-              balanceStale: false,
-            };
+        // Merge tokens: priority to tokens with positive balance
+        const tokenMap = new Map<string, JettonBalance>();
+        knownTokens.forEach(t => tokenMap.set(t.jettonAddress || t.symbol, t));
+        discoveredTokens.forEach(t => {
+          const key = t.jettonAddress || t.symbol;
+          tokenMap.set(key, t);
+        });
 
-            if (onWalletUpdated) {
-              onWalletUpdated(updated[index]);
-            }
-          } catch (e) {
-            console.warn(`Error updating Solana wallet ${wallet.address}:`, e);
-            updated[index] = { ...updated[index], balanceStale: true };
-            if (onWalletUpdated) onWalletUpdated(updated[index]);
-          } finally {
-            done++;
-            if (onProgress) onProgress(done, updated.length);
+        // Also ensure any existing wallet tokens with balance > 0 are preserved
+        (wallet.jettons || []).forEach(existing => {
+          const key = existing.jettonAddress || existing.symbol;
+          if (parseFloat(existing.balance || '0') > 0 && !tokenMap.has(key)) {
+            tokenMap.set(key, existing);
           }
-        })
-      );
+        });
 
-      // Minor pause to protect against rate limits
-      if (i + CHUNK_SIZE < updated.length) {
-        await new Promise(r => setTimeout(r, 50));
+        const finalTokens = Array.from(tokenMap.values());
+
+        const currentNetBalances = updated[i].networkBalances || {};
+        const updatedNetBalances = {
+          ...currentNetBalances,
+          [network]: {
+            ton: solBal,
+            tonNano: solNano,
+            jettons: finalTokens,
+            nfts: updated[i].nfts || [],
+          },
+        };
+
+        updated[i] = {
+          ...updated[i],
+          balance: solBal,
+          balanceNano: solNano,
+          jettons: finalTokens,
+          networkBalances: updatedNetBalances,
+          lastChecked: Date.now(),
+          balanceStale: false,
+        };
+
+        if (onWalletUpdated) {
+          onWalletUpdated(updated[i]);
+        }
+      } catch (e) {
+        console.warn(`Error updating Solana wallet ${wallet.address}:`, e);
+        updated[i] = { ...updated[i], balanceStale: true };
+        if (onWalletUpdated) onWalletUpdated(updated[i]);
+      } finally {
+        done++;
+        if (onProgress) onProgress(done, updated.length);
       }
     }
 

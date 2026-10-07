@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { ManagedWallet, Network, VaultConfig, NFTItem } from './types';
 import { TonService, SAMPLE_POPULAR_NFTS } from './services/tonService';
 import { SolanaService } from './services/solanaService';
@@ -42,6 +42,8 @@ import { Layers, RefreshCw } from 'lucide-react';
 
 export function App() {
   const [wallets, setWallets] = useState<ManagedWallet[]>([]);
+  const walletsRef = useRef<ManagedWallet[]>(wallets);
+  walletsRef.current = wallets;
   const [network, setNetwork] = useState<Network>('mainnet');
   const [vaultConfig, setVaultConfig] = useState<VaultConfig>({ isLocked: false, hasPin: false });
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -206,6 +208,11 @@ export function App() {
         }
 
         setWallets(normalized);
+        walletsRef.current = normalized;
+        // Automatically fetch live on-chain balances on startup
+        setTimeout(() => {
+          handleRefreshBalances(normalized, true);
+        }, 150);
       }
     }
 
@@ -216,6 +223,7 @@ export function App() {
   const persistWallets = useCallback((updatedWallets: ManagedWallet[]) => {
     const normalized = normalizeWallets(updatedWallets);
     setWallets(normalized);
+    walletsRef.current = normalized;
     StorageService.saveWallets(normalized);
   }, []);
 
@@ -239,36 +247,39 @@ export function App() {
   };
 
   // Refresh balances for all wallets (TON + Solana + Tokens)
-  const handleRefreshBalances = async () => {
-    if (wallets.length === 0 || isRefreshing) return;
+  const handleRefreshBalances = useCallback(async (targetWallets?: ManagedWallet[], silent = false) => {
+    const list = targetWallets || walletsRef.current;
+    if (!list || list.length === 0 || isRefreshing) return;
     setIsRefreshing(true);
-    setRefreshProgress({ done: 0, total: wallets.length });
-    showToast(`Fetching real on-chain ${network.toUpperCase()} balances (TON & Solana)...`);
+    setRefreshProgress({ done: 0, total: list.length });
+    if (!silent) {
+      showToast(`Fetching real on-chain ${network.toUpperCase()} balances (TON & Solana)...`);
+    }
 
     try {
-      const tonWallets = wallets.filter(w => !w.chain || w.chain === 'ton');
-      const solanaWallets = wallets.filter(w => w.chain === 'solana');
-      // Per-wallet callback fires on both success and stale-failure, so one
-      // counter tracks the whole refresh across both chains.
+      const tonWallets = list.filter(w => !w.chain || w.chain === 'ton');
+      const solanaWallets = list.filter(w => w.chain === 'solana');
+
       let completed = 0;
       const trackWallet = (w: ManagedWallet) => {
         setWallets(prev => prev.map(item => item.id === w.id ? w : item));
         completed++;
-        setRefreshProgress({ done: completed, total: wallets.length });
+        setRefreshProgress({ done: completed, total: list.length });
       };
 
       let updatedTon: ManagedWallet[] = [];
-      if (tonWallets.length > 0) {
-        updatedTon = await TonService.batchUpdateBalances(tonWallets, network, trackWallet);
-      }
-
       let updatedSol: ManagedWallet[] = [];
-      if (solanaWallets.length > 0) {
-        updatedSol = await SolanaService.batchUpdateBalances(solanaWallets, network, trackWallet);
-      }
-      // Ensure the bar reads complete even if a chain's per-wallet callback
-      // under-reports.
-      setRefreshProgress({ done: wallets.length, total: wallets.length });
+
+      // Run TON and Solana updates concurrently
+      const [resTon, resSol] = await Promise.allSettled([
+        tonWallets.length > 0 ? TonService.batchUpdateBalances(tonWallets, network, trackWallet) : Promise.resolve([]),
+        solanaWallets.length > 0 ? SolanaService.batchUpdateBalances(solanaWallets, network, trackWallet) : Promise.resolve([]),
+      ]);
+
+      if (resTon.status === 'fulfilled') updatedTon = resTon.value;
+      if (resSol.status === 'fulfilled') updatedSol = resSol.value;
+
+      setRefreshProgress({ done: list.length, total: list.length });
 
       setWallets(prev => {
         const merged = prev.map(p => {
@@ -278,23 +289,48 @@ export function App() {
           if (matchSol) return matchSol;
           return p;
         });
+        walletsRef.current = merged;
         StorageService.saveWallets(merged);
         return merged;
       });
-      const staleCount = updatedTon.filter(u => u.balanceStale).length;
-      showToast(
-        staleCount > 0
-          ? `${network.toUpperCase()} balances updated — ${staleCount} wallet(s) unreachable, kept last known values.`
-          : `${network.toUpperCase()} balances updated from blockchain!`
-      );
+
+      const staleCount = updatedTon.filter(u => u.balanceStale).length + updatedSol.filter(u => u.balanceStale).length;
+      if (!silent) {
+        showToast(
+          staleCount > 0
+            ? `${network.toUpperCase()} balances updated — ${staleCount} wallet(s) unreachable, kept last known values.`
+            : `${network.toUpperCase()} balances updated from blockchain!`
+        );
+      }
     } catch (e) {
       console.error('Failed to refresh balances:', e);
-      showToast('Error refreshing balances');
+      if (!silent) showToast('Error refreshing balances');
     } finally {
       setIsRefreshing(false);
       setRefreshProgress(null);
     }
-  };
+  }, [network, isRefreshing]);
+
+  // Periodic background refresh (45s) and tab-focus refresh (detects incoming transfers immediately)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (walletsRef.current.length > 0 && !isRefreshing) {
+        handleRefreshBalances(undefined, true);
+      }
+    }, 45000);
+
+    const onFocus = () => {
+      if (walletsRef.current.length > 0 && !isRefreshing) {
+        handleRefreshBalances(undefined, true);
+      }
+    };
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [handleRefreshBalances, isRefreshing]);
 
   // Vault Wallet created
   const handleVaultCreated = (newVault: ManagedWallet) => {
