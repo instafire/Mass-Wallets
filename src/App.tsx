@@ -247,8 +247,8 @@ export function App() {
   };
 
   // Refresh balances for all wallets (TON + Solana + Tokens)
-  const handleRefreshBalances = useCallback(async (targetWallets?: ManagedWallet[], silent = false) => {
-    const list = targetWallets || walletsRef.current;
+  const handleRefreshBalances = useCallback(async (targetWallets?: ManagedWallet[] | unknown, silent = false) => {
+    const list = Array.isArray(targetWallets) ? targetWallets : walletsRef.current;
     if (!list || list.length === 0 || isRefreshing) return;
     setIsRefreshing(true);
     setRefreshProgress({ done: 0, total: list.length });
@@ -257,8 +257,8 @@ export function App() {
     }
 
     try {
-      const tonWallets = list.filter(w => !w.chain || w.chain === 'ton');
-      const solanaWallets = list.filter(w => w.chain === 'solana');
+      const solanaWallets = list.filter(w => w.chain === 'solana' || w.version === 'solana-ed25519' || w.version === 'squads-v4' || (w.address && !w.address.startsWith('EQ') && !w.address.startsWith('UQ') && !w.address.includes(':')));
+      const tonWallets = list.filter(w => !solanaWallets.some(sw => sw.id === w.id));
 
       let completed = 0;
       const trackWallet = (w: ManagedWallet) => {
@@ -467,7 +467,7 @@ export function App() {
         onOpenSolanaAddressSheet={() => handleOpenSolanaAddressSheet()}
         onOpenSolanaTokenPortfolio={handleOpenSolanaTokenPortfolio}
         onOpenSolanaFaucet={handleOpenSolanaFaucet}
-        onRefreshBalances={handleRefreshBalances}
+        onRefreshBalances={() => handleRefreshBalances()}
         isRefreshing={isRefreshing}
         walletCount={wallets.length}
       />
@@ -868,7 +868,7 @@ export function App() {
         onFilterByToken={(_tokenSymbol) => {
           showToast(`Filtered studio wallets for ${_tokenSymbol}`);
         }}
-        onRefreshBalances={handleRefreshBalances}
+        onRefreshBalances={() => handleRefreshBalances()}
       />
 
       {/* Solana Devnet Airdrop Faucet Modal */}

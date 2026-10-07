@@ -23,18 +23,23 @@ import type {
 // Squads Protocol v4 Program ID (Verified Mainnet & Devnet)
 export const SQUADS_V4_PROGRAM_ID = squads.PROGRAM_ID;
 
-// Solana RPC endpoints
-const SOLANA_RPC_ENDPOINTS: Record<Network, string[]> = {
-  mainnet: [
-    'https://api.mainnet-beta.solana.com',
-    'https://solana-rpc.publicnode.com',
-    'https://rpc.ankr.com/solana',
-  ],
-  testnet: [
-    'https://api.devnet.solana.com',
-    'https://api.testnet.solana.com',
-  ],
-};
+// Solana RPC endpoints helper: loopback proxy (/api/rpc/solana) and browser-friendly public nodes
+export function getSolanaEndpoints(network: Network = 'mainnet'): string[] {
+  if (network === 'testnet') {
+    return [
+      'https://api.devnet.solana.com',
+      'https://api.testnet.solana.com',
+    ];
+  }
+  const isBrowser = typeof window !== 'undefined' && typeof window.location !== 'undefined' && !!window.location?.origin;
+  const list: string[] = [];
+  if (isBrowser && window.location.protocol.startsWith('http')) {
+    list.push(`${window.location.origin}/api/rpc/solana`);
+  }
+  list.push('https://solana-rpc.publicnode.com');
+  list.push('https://api.mainnet-beta.solana.com');
+  return list;
+}
 
 // Popular Solana SPL Tokens registry
 export const SUPPORTED_SOLANA_TOKENS: JettonTokenInfo[] = [
@@ -120,11 +125,20 @@ export class SolanaService {
    */
   public static getConnection(network: Network = 'mainnet'): Connection {
     if (!this.connectionCache.has(network)) {
-      const endpoints = SOLANA_RPC_ENDPOINTS[network] || SOLANA_RPC_ENDPOINTS.mainnet;
+      const endpoints = getSolanaEndpoints(network);
       const connection = new Connection(endpoints[0], 'confirmed');
       this.connectionCache.set(network, connection);
     }
     return this.connectionCache.get(network)!;
+  }
+
+  /**
+   * Get alternate fallback Connection if primary fails
+   */
+  public static getFallbackConnection(network: Network = 'mainnet'): Connection {
+    const endpoints = getSolanaEndpoints(network);
+    const fallbackEndpoint = endpoints[1] || endpoints[0];
+    return new Connection(fallbackEndpoint, 'confirmed');
   }
 
   /**
@@ -444,9 +458,22 @@ export class SolanaService {
           });
         });
       } catch (e) {
-        // RPC chunk failed: leave these addresses OUT of the map so the
-        // caller marks them stale instead of zeroing real balances.
-        console.warn(`Error batch-fetching Solana balances chunk ${i}:`, e);
+        try {
+          const fallbackConn = this.getFallbackConnection(network);
+          const publicKeys = chunk.map(a => new PublicKey(a));
+          const accounts = await fallbackConn.getMultipleAccountsInfo(publicKeys);
+          accounts.forEach((acc, idx) => {
+            const addr = chunk[idx];
+            const lamports = acc ? acc.lamports : 0;
+            const sol = lamports / LAMPORTS_PER_SOL;
+            results.set(addr, {
+              balance: sol.toFixed(4),
+              balanceNano: lamports.toString(),
+            });
+          });
+        } catch (err2) {
+          console.warn(`Error batch-fetching Solana balances chunk ${i}:`, err2);
+        }
       }
     }
 
@@ -664,7 +691,43 @@ export class SolanaService {
           resultMap.set(item.walletAddress, currentList);
         });
       } catch (e) {
-        console.warn(`Error batch-fetching Solana ATAs chunk ${i}:`, e);
+        try {
+          const fallbackConn = this.getFallbackConnection(network);
+          const publicKeys = chunk.map(item => item.ata);
+          const accounts = await fallbackConn.getMultipleAccountsInfo(publicKeys);
+
+          accounts.forEach((acc, idx) => {
+            const item = chunk[idx];
+            let uiAmount = '0.00';
+            if (acc) {
+              try {
+                const unpacked = unpackAccount(item.ata, acc, item.programId);
+                const rawAmount = unpacked.amount;
+                uiAmount = (Number(rawAmount) / Math.pow(10, item.tokenInfo.decimals)).toString();
+              } catch (err) {
+                console.warn(`Error unpacking ATA ${item.ata.toBase58()}:`, err);
+              }
+            }
+
+            const balNum = parseFloat(uiAmount);
+            const price = item.tokenInfo.usdPrice || (prices.tokens[item.tokenInfo.symbol.toUpperCase()] || 0);
+            const usdVal = balNum * price;
+
+            const currentList = resultMap.get(item.walletAddress) || [];
+            currentList.push({
+              symbol: item.tokenInfo.symbol,
+              name: item.tokenInfo.name,
+              balance: balNum > 0 ? uiAmount : '0.00',
+              decimals: item.tokenInfo.decimals,
+              jettonAddress: item.tokenInfo.masterAddress,
+              icon: item.tokenInfo.icon,
+              usdValue: PriceService.formatUsd(usdVal, false),
+            });
+            resultMap.set(item.walletAddress, currentList);
+          });
+        } catch (err2) {
+          console.warn(`Error batch-fetching Solana ATAs chunk ${i}:`, err2);
+        }
       }
     }
 

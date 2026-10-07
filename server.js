@@ -309,6 +309,36 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // 6. POST /api/rpc/solana
+  // Fast loopback Solana RPC proxy to eliminate browser Origin 403 Forbidden blocks and CORS limits
+  if (pathname === '/api/rpc/solana' && req.method === 'POST') {
+    try {
+      const rawBody = await readBody(req);
+      const upstreamEndpoints = [
+        'https://solana-rpc.publicnode.com',
+        'https://api.mainnet-beta.solana.com'
+      ];
+      for (const endpoint of upstreamEndpoints) {
+        try {
+          const upstream = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: rawBody,
+          });
+          if (upstream.ok) {
+            const data = await upstream.json();
+            return sendJson(res, 200, data);
+          }
+        } catch {
+          // try next endpoint
+        }
+      }
+      return sendJson(res, 502, { jsonrpc: '2.0', error: { code: -32603, message: 'Upstream Solana RPC unreachable' } });
+    } catch (err) {
+      return sendJson(res, 500, { jsonrpc: '2.0', error: { code: -32603, message: err?.message || 'RPC proxy error' } });
+    }
+  }
+
   // ==========================================
   // STATIC ASSETS SERVING (Production Build)
   // ==========================================
