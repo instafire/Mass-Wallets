@@ -204,6 +204,41 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+// Helper: Sanitize wallets array to strip any demo/sample NFTs
+function sanitizeWallets(wallets) {
+  if (!Array.isArray(wallets)) return [];
+  const isFake = (n) => {
+    if (!n || typeof n !== 'object') return false;
+    const id = typeof n.id === 'string' ? n.id : '';
+    const name = typeof n.name === 'string' ? n.name : '';
+    return (
+      id.startsWith('demo_') ||
+      id.startsWith('sample_') ||
+      id.startsWith('nft_sample_') ||
+      name.startsWith('demo_nft')
+    );
+  };
+  return wallets.map(w => {
+    const cleanNfts = Array.isArray(w.nfts) ? w.nfts.filter(n => !isFake(n)) : [];
+    const netBalances = w.networkBalances ? { ...w.networkBalances } : undefined;
+    if (netBalances) {
+      ['mainnet', 'testnet'].forEach(net => {
+        if (netBalances[net] && Array.isArray(netBalances[net].nfts)) {
+          netBalances[net] = {
+            ...netBalances[net],
+            nfts: netBalances[net].nfts.filter(n => !isFake(n)),
+          };
+        }
+      });
+    }
+    return {
+      ...w,
+      nfts: cleanNfts,
+      ...(netBalances ? { networkBalances: netBalances } : {}),
+    };
+  });
+}
+
   // 2. GET /api/wallets
   if (pathname === '/api/wallets' && req.method === 'GET') {
     // A) Check local store file
@@ -211,6 +246,9 @@ const server = http.createServer(async (req, res) => {
       try {
         const content = fs.readFileSync(STORE_FILE, 'utf8');
         const parsed = JSON.parse(content);
+        if (Array.isArray(parsed.wallets)) {
+          parsed.wallets = sanitizeWallets(parsed.wallets);
+        }
         return sendJson(res, 200, { success: true, source: 'local_file', ...parsed });
       } catch (err) {
         console.error('Error reading vault_wallets.json:', err);
@@ -225,6 +263,9 @@ const server = http.createServer(async (req, res) => {
         console.log(`[vault] No local vault file; adopting latest Downloads backup: ${latest.filename}`);
         const content = fs.readFileSync(latest.fullPath, 'utf8');
         const parsed = JSON.parse(content);
+        if (Array.isArray(parsed.wallets)) {
+          parsed.wallets = sanitizeWallets(parsed.wallets);
+        }
         fs.writeFileSync(STORE_FILE, JSON.stringify(parsed, null, 2), 'utf8');
         return sendJson(res, 200, {
           success: true,
@@ -269,7 +310,8 @@ const server = http.createServer(async (req, res) => {
           vaultConfig: parsed.vaultConfig || { isLocked: false, hasPin: true },
         };
       } else {
-        const wallets = Array.isArray(parsed.wallets) ? parsed.wallets : [];
+        const rawWallets = Array.isArray(parsed.wallets) ? parsed.wallets : [];
+        const wallets = sanitizeWallets(rawWallets);
         count = wallets.length;
         toSave = {
           version: '2.0.0',

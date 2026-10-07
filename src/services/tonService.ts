@@ -102,88 +102,6 @@ export const SUPPORTED_JETTONS: JettonTokenInfo[] = [
   },
 ];
 
-// Curated Sample Verified TON Collectibles / Demo NFTs
-export const SAMPLE_POPULAR_NFTS: Omit<NFTItem, 'id' | 'ownerAddress'>[] = [
-  {
-    address: 'EQAOQGQGNPP448D-r8G-U6W5XQ4r2Q33D3Lh7X395t89zQJ2',
-    name: '+888 0123 4567',
-    description: 'Anonymous Telegram Number NFT issued by Fragment on TON blockchain.',
-    image: 'https://nft.fragment.com/number/88801234567.webp',
-    previewImage: 'https://nft.fragment.com/number/88801234567.webp',
-    collectionName: 'Anonymous Telegram Numbers',
-    collectionAddress: 'EQAOQGQGNPP448D-r8G-U6W5XQ4r2Q33D3Lh7X395t89zQJ2',
-    index: 1234567,
-    verified: true,
-    attributes: [
-      { trait_type: 'Length', value: '11 digits' },
-      { trait_type: 'Prefix', value: '+888' },
-      { trait_type: 'Rarity', value: 'Rare Collectible' }
-    ]
-  },
-  {
-    address: 'EQBAjaYwtubOx7tfv9DUEcqG05uBMVM4b5G26xuhUDRfXWG3',
-    name: '@crypto_whale',
-    description: 'Collectible Telegram Username NFT secured on the TON blockchain.',
-    image: 'https://nft.fragment.com/username/crypto_whale.webp',
-    previewImage: 'https://nft.fragment.com/username/crypto_whale.webp',
-    collectionName: 'Telegram Usernames',
-    collectionAddress: 'EQBAjaYwtubOx7tfv9DUEcqG05uBMVM4b5G26xuhUDRfXWG3',
-    index: 8821,
-    verified: true,
-    attributes: [
-      { trait_type: 'Length', value: '12 characters' },
-      { trait_type: 'Category', value: 'Finance & Web3' },
-      { trait_type: 'Verified', value: 'Fragment Official' }
-    ]
-  },
-  {
-    address: 'EQD_tYBfZ6548n9v6Y7xM_t4035jK4s_8jEw1pU7xQ3rR5k1',
-    name: 'TON Diamond #108',
-    description: 'Official TON Diamonds collection of fine digital generative art.',
-    image: 'https://tondiamonds.s3.eu-central-1.amazonaws.com/diamonds/medium/108.png',
-    previewImage: 'https://tondiamonds.s3.eu-central-1.amazonaws.com/diamonds/medium/108.png',
-    collectionName: 'TON Diamonds',
-    collectionAddress: 'EQAG2BOZ2DmhmzOoRIOr5C2jeTLocmSV5jviBoOxECK5m-9j',
-    index: 108,
-    verified: true,
-    attributes: [
-      { trait_type: 'Cut', value: 'Brilliant Round' },
-      { trait_type: 'Carat', value: 'Large Diamond' },
-      { trait_type: 'Color', value: 'Deep Sapphire Blue' }
-    ]
-  },
-  {
-    address: 'EQB0_7t0B21L5tX1xP2g_98D_7K9t2p1j5xQ987w3e2r1t4y',
-    name: 'DOGS Club Pass #777',
-    description: 'Exclusive community collectible for active TON ecosystem pioneers.',
-    image: 'https://cache.tonapi.io/imgproxy/gR8oZ_qO7tG_rQ5vP9zL1xK2wE0/rs:fill:500:500:1/g:no/aHR0cHM6Ly9kb2dzLm1lZGlhL2NsdWJfNzc3LnBuZw.webp',
-    previewImage: 'https://cache.tonapi.io/imgproxy/gR8oZ_qO7tG_rQ5vP9zL1xK2wE0/rs:fill:500:500:1/g:no/aHR0cHM6Ly9kb2dzLm1lZGlhL2NsdWJfNzc3LnBuZw.webp',
-    collectionName: 'DOGS Club Collectibles',
-    collectionAddress: 'EQB0_7t0B21L5tX1xP2g_98D_7K9t2p1j5xQ987w3e2r1t4y',
-    index: 777,
-    verified: true,
-    attributes: [
-      { trait_type: 'Tier', value: 'VIP Founding Dog' },
-      { trait_type: 'Status', value: 'Active Member' }
-    ]
-  },
-  {
-    address: 'EQC3_4k7X8p9L0w1Z2x3C4v5B6n7M8j9K0l1A2s3D4f5G6h7',
-    name: 'treasury-vault.ton',
-    description: 'TON DNS Decentralized Web3 Domain name contract.',
-    image: 'https://cache.tonapi.io/imgproxy/default-dns.png',
-    previewImage: 'https://cache.tonapi.io/imgproxy/default-dns.png',
-    collectionName: 'TON DNS Domains',
-    collectionAddress: 'EQC3_4k7X8p9L0w1Z2x3C4v5B6n7M8j9K0l1A2s3D4f5G6h7',
-    index: 1402,
-    verified: true,
-    attributes: [
-      { trait_type: 'TLD', value: '.ton' },
-      { trait_type: 'Domain', value: 'treasury-vault' }
-    ]
-  }
-];
-
 export type SupportedWalletContract = WalletContractV4 | WalletContractV3R2 | WalletContractV5R1;
 
 export class TonService {
@@ -514,8 +432,10 @@ export class TonService {
 
             // null = fetch failed → keep the last known values
             const finalJettons = jettons === null ? (updated[index].jettons || []) : jettons;
-            const existingNfts = updated[index].nfts || [];
-            const customLocalNfts = existingNfts.filter(n => n.id.startsWith('custom_') || n.id.startsWith('demo_'));
+            const existingNfts = (updated[index].nfts || []).filter(
+              n => !n.id.startsWith('demo_') && !n.id.startsWith('sample_') && !n.id.startsWith('nft_sample_')
+            );
+            const customLocalNfts = existingNfts.filter(n => n.id.startsWith('custom_'));
             const finalNfts = liveNfts === null ? existingNfts : [...liveNfts, ...customLocalNfts];
 
             const currentNetBalances = updated[index].networkBalances || {};

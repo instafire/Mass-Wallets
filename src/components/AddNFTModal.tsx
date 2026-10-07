@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import type { ManagedWallet, NFTItem, Network } from '../types';
-import { SAMPLE_POPULAR_NFTS, TonService } from '../services/tonService';
+import { TonService } from '../services/tonService';
 import { ActivityService } from '../services/activityService';
 import confetti from 'canvas-confetti';
 import { 
   X, 
   Plus, 
-  Sparkles, 
   Upload, 
   Image as ImageIcon, 
   Search,
@@ -30,11 +29,8 @@ export const AddNFTModal: React.FC<AddNFTModalProps> = ({
   initialTargetWalletId,
   onNFTAdded,
 }) => {
-  const [tab, setTab] = useState<'sample' | 'import' | 'custom'>('sample');
+  const [tab, setTab] = useState<'import' | 'custom'>('import');
   const [targetWalletId, setTargetWalletId] = useState<string>(initialTargetWalletId || (wallets[0]?.id || ''));
-  
-  // Quick-Add Sample state
-  const [selectedSampleIdx, setSelectedSampleIdx] = useState<number>(0);
 
   // Import on-chain address state
   const [importAddress, setImportAddress] = useState<string>('');
@@ -63,43 +59,6 @@ export const AddNFTModal: React.FC<AddNFTModalProps> = ({
   if (!isOpen) return null;
 
   const targetWallet = wallets.find(w => w.id === targetWalletId) || wallets[0];
-
-  const handleAddSample = () => {
-    if (!targetWallet) return;
-    const sample = SAMPLE_POPULAR_NFTS[selectedSampleIdx];
-    if (!sample) return;
-
-    const newNft: NFTItem = {
-      ...sample,
-      id: `nft_sample_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      ownerAddress: targetWallet.address,
-      addedAt: Date.now(),
-    };
-
-    const updated = wallets.map(w => {
-      if (w.id === targetWallet.id) {
-        return {
-          ...w,
-          nfts: [...(w.nfts || []), newNft],
-        };
-      }
-      return w;
-    });
-
-    ActivityService.log({
-      type: 'receive',
-      title: `Added NFT: ${newNft.name}`,
-      description: `Added collectible ${newNft.name} to ${targetWallet.label}`,
-      toAddress: targetWallet.address,
-      token: 'NFT',
-      amount: '1',
-      status: 'success',
-    });
-
-    confetti({ particleCount: 75, spread: 65, origin: { y: 0.6 } });
-    onNFTAdded(updated);
-    onClose();
-  };
 
   const handleImportOnChain = async () => {
     if (!targetWallet || !importAddress.trim()) return;
@@ -256,7 +215,7 @@ export const AddNFTModal: React.FC<AddNFTModalProps> = ({
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">Add & Mint TON NFT Collectibles</h2>
-              <p className="text-xs text-gray-400">Import on-chain NFTs, add verified Telegram items, or create custom art</p>
+              <p className="text-xs text-gray-400">Import on-chain NFTs by contract address or create custom collectibles</p>
             </div>
           </div>
           <button 
@@ -286,16 +245,16 @@ export const AddNFTModal: React.FC<AddNFTModalProps> = ({
         </div>
 
         {/* Tab Selection */}
-        <div className="pt-3 grid grid-cols-3 gap-2">
+        <div className="pt-3 grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => setTab('sample')}
+            onClick={() => setTab('import')}
             className={`tab-btn p-2.5 text-center text-xs font-bold transition-all ${
-              tab === 'sample' ? 'active-purple' : ''
+              tab === 'import' ? 'active-purple' : ''
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5 mx-auto mb-1 text-purple-400" />
-            <span>Curated Demo</span>
+            <Search className="w-3.5 h-3.5 mx-auto mb-1 text-blue-400" />
+            <span>On-Chain Item</span>
           </button>
 
           <button
@@ -308,70 +267,7 @@ export const AddNFTModal: React.FC<AddNFTModalProps> = ({
             <Upload className="w-3.5 h-3.5 mx-auto mb-1 text-indigo-400" />
             <span>Create Custom</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => setTab('import')}
-            className={`tab-btn p-2.5 text-center text-xs font-bold transition-all ${
-              tab === 'import' ? 'active-purple' : ''
-            }`}
-          >
-            <Search className="w-3.5 h-3.5 mx-auto mb-1 text-blue-400" />
-            <span>On-Chain Item</span>
-          </button>
         </div>
-
-        {/* Tab 1: Curated Samples */}
-        {tab === 'sample' && (
-          <div className="py-4 space-y-4">
-            <label className="block text-xs font-semibold text-gray-300">
-              Select Curated TON Ecosystem Collectible:
-            </label>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto p-1">
-              {SAMPLE_POPULAR_NFTS.map((item, idx) => (
-                <div
-                  key={idx}
-                  onClick={() => setSelectedSampleIdx(idx)}
-                  className={`glass-card p-3 rounded-xl border transition-all cursor-pointer flex items-center gap-3 ${
-                    selectedSampleIdx === idx 
-                      ? 'border-purple-500 bg-purple-500/10 shadow-lg shadow-purple-500/10' 
-                      : 'border-white/10 hover:border-white/20'
-                  }`}
-                >
-                  <div className="w-12 h-12 rounded-lg overflow-hidden bg-[#0a1020] shrink-0 border border-white/5 flex items-center justify-center">
-                    <img
-                      src={item.image}
-                      alt={item.name}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?w=500&auto=format&fit=crop&q=60';
-                      }}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[10px] text-purple-400 font-medium block truncate">
-                      {item.collectionName}
-                    </span>
-                    <h4 className="text-xs font-bold text-white truncate">{item.name}</h4>
-                    <span className="text-[10px] text-gray-400 block truncate">
-                      {item.attributes?.[0]?.trait_type}: {item.attributes?.[0]?.value}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleAddSample}
-              className="btn btn-primary w-full py-2.5 text-xs font-bold flex items-center justify-center gap-2 shadow-lg"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Selected Collectible to {targetWallet?.label}</span>
-            </button>
-          </div>
-        )}
 
         {/* Tab 2: Custom NFT Creator */}
         {tab === 'custom' && (

@@ -1,5 +1,5 @@
 import CryptoJS from 'crypto-js';
-import type { ManagedWallet, VaultConfig, WalletBackupExport, Network, NetworkBalanceData } from '../types';
+import type { ManagedWallet, VaultConfig, WalletBackupExport, Network, NetworkBalanceData, NFTItem } from '../types';
 import { isSolanaWallet } from '../types';
 
 const STORAGE_KEY_WALLETS = 'tonkeeper_mass_wallets_v2';
@@ -242,6 +242,23 @@ async function idbDelete(key: string): Promise<void> {
   }
 }
 
+export function isFakeNft(item: any): boolean {
+  if (!item || typeof item !== 'object') return false;
+  const id = typeof item.id === 'string' ? item.id : '';
+  const name = typeof item.name === 'string' ? item.name : '';
+  return (
+    id.startsWith('demo_') ||
+    id.startsWith('sample_') ||
+    id.startsWith('nft_sample_') ||
+    name.startsWith('demo_nft')
+  );
+}
+
+export function filterRealNfts(nfts: any[] | undefined): NFTItem[] {
+  if (!Array.isArray(nfts)) return [];
+  return nfts.filter(n => !isFakeNft(n));
+}
+
 export function normalizeWallet(w: any): ManagedWallet {
   const mnemonicArr: string[] = Array.isArray(w.mnemonic)
     ? w.mnemonic
@@ -256,27 +273,41 @@ export function normalizeWallet(w: any): ManagedWallet {
       : Date.now();
 
   const defaultJettons = Array.isArray(w.jettons) ? w.jettons : [];
-  const defaultNfts = Array.isArray(w.nfts) ? w.nfts : [];
+  const defaultNfts = filterRealNfts(w.nfts);
 
-  const mainnetData: NetworkBalanceData = w.networkBalances?.mainnet || {
+  const rawMainnetNfts = w.networkBalances?.mainnet?.nfts;
+  const mainnetNfts = filterRealNfts(Array.isArray(rawMainnetNfts) ? rawMainnetNfts : defaultNfts);
+  const testnetNfts = filterRealNfts(w.networkBalances?.testnet?.nfts);
+
+  const mainnetData: NetworkBalanceData = w.networkBalances?.mainnet ? {
+    ton: typeof w.networkBalances.mainnet.ton === 'string' ? w.networkBalances.mainnet.ton : (typeof w.balance === 'string' ? w.balance : '0.00'),
+    tonNano: typeof w.networkBalances.mainnet.tonNano === 'string' ? w.networkBalances.mainnet.tonNano : (typeof w.balanceNano === 'string' ? w.balanceNano : '0'),
+    jettons: Array.isArray(w.networkBalances.mainnet.jettons) ? w.networkBalances.mainnet.jettons : defaultJettons,
+    nfts: mainnetNfts,
+  } : {
     ton: typeof w.balance === 'string' ? w.balance : '0.00',
     tonNano: typeof w.balanceNano === 'string' ? w.balanceNano : '0',
     jettons: defaultJettons,
-    nfts: defaultNfts,
+    nfts: mainnetNfts,
   };
 
-  const testnetData: NetworkBalanceData = w.networkBalances?.testnet || {
+  const testnetData: NetworkBalanceData = w.networkBalances?.testnet ? {
+    ton: typeof w.networkBalances.testnet.ton === 'string' ? w.networkBalances.testnet.ton : '0.00',
+    tonNano: typeof w.networkBalances.testnet.tonNano === 'string' ? w.networkBalances.testnet.tonNano : '0',
+    jettons: Array.isArray(w.networkBalances.testnet.jettons) ? w.networkBalances.testnet.jettons : [],
+    nfts: testnetNfts,
+  } : {
     ton: '0.00',
     tonNano: '0',
     jettons: [],
-    nfts: [],
+    nfts: testnetNfts,
   };
 
   // Preserve current balance and NFTs if valid, else fall back to mainnet
   const activeBalance = typeof w.balance === 'string' ? w.balance : mainnetData.ton;
   const activeBalanceNano = typeof w.balanceNano === 'string' ? w.balanceNano : mainnetData.tonNano;
   const activeJettons = Array.isArray(w.jettons) ? w.jettons : (mainnetData.jettons || []);
-  const activeNfts = Array.isArray(w.nfts) ? w.nfts : (mainnetData.nfts || []);
+  const activeNfts = defaultNfts.length > 0 ? defaultNfts : mainnetNfts;
 
   const detectedChain = w.chain || (isSolanaWallet(w) ? 'solana' : 'ton');
 
@@ -307,11 +338,11 @@ export function normalizeWallet(w: any): ManagedWallet {
         ton: activeBalance,
         tonNano: activeBalanceNano,
         jettons: activeJettons,
-        nfts: mainnetData.nfts || defaultNfts,
+        nfts: mainnetNfts,
       },
       testnet: {
         ...testnetData,
-        nfts: testnetData.nfts || [],
+        nfts: testnetNfts,
       },
     },
     isMainWallet: !!w.isMainWallet,
@@ -333,14 +364,22 @@ export class StorageService {
    * leave this function when the vault is locked.
    */
   public static saveWallets(wallets: ManagedWallet[], pin?: string): void {
-    // Demo/sample NFTs (id prefix `demo_`) are exploration aids only — never
-    // persist them into the vault file.
-    const withoutDemos = wallets.map(w =>
-      w.nfts && w.nfts.some(n => typeof n.id === 'string' && n.id.startsWith('demo_'))
-        ? { ...w, nfts: w.nfts.filter(n => !(typeof n.id === 'string' && n.id.startsWith('demo_'))) }
-        : w
-    );
-    const normalized = normalizeWallets(withoutDemos);
+    // Fake/demo NFTs must never be persisted into the vault
+    const sanitizedWallets = wallets.map(w => ({
+      ...w,
+      nfts: filterRealNfts(w.nfts),
+      networkBalances: w.networkBalances ? {
+        mainnet: w.networkBalances.mainnet ? {
+          ...w.networkBalances.mainnet,
+          nfts: filterRealNfts(w.networkBalances.mainnet.nfts),
+        } : undefined as any,
+        testnet: w.networkBalances.testnet ? {
+          ...w.networkBalances.testnet,
+          nfts: filterRealNfts(w.networkBalances.testnet.nfts),
+        } : undefined as any,
+      } : undefined,
+    }));
+    const normalized = normalizeWallets(sanitizedWallets);
     const jsonString = JSON.stringify(normalized);
 
     const effectivePin = pin && pin.trim().length >= 4 ? pin.trim() : sessionPin;

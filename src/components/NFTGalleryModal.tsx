@@ -8,7 +8,6 @@ import {
   Search, 
   Plus, 
   CheckCircle2, 
-  Sparkles, 
   Copy, 
   Check, 
   Tag,
@@ -215,7 +214,7 @@ export const NFTGalleryModal: React.FC<NFTGalleryModalProps> = ({
                 <h3 className="text-white font-bold text-sm">No NFTs Found</h3>
                 <p className="text-xs text-gray-400 mt-1">
                   {allNFTEntries.length === 0
-                    ? "You don't have any NFTs in your studio wallets yet. Add or mint a demo collectible to get started!"
+                    ? "You don't have any NFTs in your studio wallets yet. Import an on-chain item or mint a custom collectible to get started!"
                     : "No collectibles match the selected wallet or collection filters."}
                 </p>
               </div>
@@ -223,8 +222,8 @@ export const NFTGalleryModal: React.FC<NFTGalleryModalProps> = ({
                 onClick={() => onOpenAddNFT(selectedWalletId !== 'all' ? selectedWalletId : undefined)}
                 className="btn btn-secondary btn-sm text-xs font-bold mt-2 flex items-center gap-1.5"
               >
-                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                <span>Add Sample Telegram / TON Collectible</span>
+                <Plus className="w-3.5 h-3.5 text-purple-400" />
+                <span>Import or Mint Collectible</span>
               </button>
             </div>
           ) : (

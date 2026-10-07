@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { ManagedWallet, Network, VaultConfig, NFTItem } from './types';
 import { isSolanaWallet } from './types';
-import { TonService, SAMPLE_POPULAR_NFTS } from './services/tonService';
+import { TonService } from './services/tonService';
 import { SolanaService } from './services/solanaService';
 import { StorageService, normalizeWallets } from './services/storageService';
 import { Header } from './components/Header';
@@ -181,33 +181,6 @@ export function App() {
         setIsUnlockModalOpen(true);
       } else if (result.wallets && result.wallets.length > 0) {
         const normalized = normalizeWallets(result.wallets);
-
-        // Seed a few verified sample NFTs IN MEMORY ONLY so the gallery isn't
-        // empty on first exploration. They are prefixed `demo_`, never
-        // persisted, and never mixed into real holdings.
-        const hasNFTs = normalized.some(w => w.nfts && w.nfts.length > 0);
-        if (!hasNFTs && normalized.length > 0) {
-          const main = normalized.find(w => w.isMainWallet) || normalized[0];
-          main.nfts = SAMPLE_POPULAR_NFTS.slice(0, 3).map((item, idx) => ({
-            ...item,
-            id: `demo_nft_sample_${idx}`,
-            ownerAddress: main.address,
-            addedAt: Date.now() - idx * 3600000,
-          }));
-          if (normalized.length > 1) {
-            normalized[1].nfts = [
-              {
-                ...SAMPLE_POPULAR_NFTS[3],
-                id: `demo_nft_sample_3`,
-                ownerAddress: normalized[1].address,
-                addedAt: Date.now() - 7200000,
-              },
-            ];
-          }
-          // Deliberately NOT persisted: demo items must never land in the
-          // vault file or be mistaken for owned assets.
-        }
-
         setWallets(normalized);
         walletsRef.current = normalized;
         // Automatically fetch live on-chain balances on startup
