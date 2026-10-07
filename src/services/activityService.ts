@@ -31,7 +31,7 @@ export class ActivityService {
             id: `act_${Date.now()}`,
             type: 'import',
             title: 'Master Vault Initialized',
-            description: 'Tonkeeper Mass Wallet Studio ready.',
+            description: 'Mass Wallet ready.',
             timestamp: Date.now(),
             status: 'success',
           },

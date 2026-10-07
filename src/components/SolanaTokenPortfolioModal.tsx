@@ -70,50 +70,17 @@ export const SolanaTokenPortfolioModal: React.FC<SolanaTokenPortfolioModalProps>
   const aggregatedTokens = useMemo(() => {
     const tokenMap = new Map<string, AggregatedToken>();
 
-    // 1. Initialize with supported tokens so they can be viewed even if balance is 0
-    SUPPORTED_SOLANA_TOKENS.forEach(t => {
-      if (t.symbol === 'SOL') return; // Native SOL is displayed in main balance
-      tokenMap.set(t.masterAddress, {
-        symbol: t.symbol,
-        name: t.name,
-        mintAddress: t.masterAddress,
-        decimals: t.decimals,
-        icon: t.icon,
-        totalBalance: 0,
-        usdPrice: t.usdPrice || 0,
-        totalUsdValue: 0,
-        holderWallets: [],
-      });
-    });
-
-    // Also initialize customTrackedMints
-    customTrackedMints.forEach(mint => {
-      if (!tokenMap.has(mint)) {
-        tokenMap.set(mint, {
-          symbol: `${mint.substring(0, 4)}...${mint.substring(mint.length - 4)}`,
-          name: `Custom Token (${mint.substring(0, 6)}...)`,
-          mintAddress: mint,
-          decimals: 6,
-          icon: '🪙',
-          totalBalance: 0,
-          usdPrice: 0,
-          totalUsdValue: 0,
-          holderWallets: [],
-        });
-      }
-    });
-
-    // 2. Iterate through all wallets and their jettons / SPL tokens
+    // Iterate through all wallets and their jettons / SPL tokens
     solanaWallets.forEach(wallet => {
       const tokens = wallet.jettons || [];
       tokens.forEach(tok => {
         if (tok.symbol === 'SOL' || tok.symbol === 'TON') return;
-        const mint = tok.jettonAddress || tok.symbol;
         const balNum = parseFloat(tok.balance || '0');
+        if (balNum <= 0) return; // Strictly ignore zero-balance tokens
 
+        const mint = tok.jettonAddress || tok.symbol;
         let entry = tokenMap.get(mint);
         if (!entry) {
-          // Check if matches a known symbol
           const known = SUPPORTED_SOLANA_TOKENS.find(st => st.symbol.toUpperCase() === tok.symbol.toUpperCase());
           const price = known?.usdPrice || (PriceService.getPrices().tokens[tok.symbol.toUpperCase()] || 0);
           entry = {
@@ -130,20 +97,18 @@ export const SolanaTokenPortfolioModal: React.FC<SolanaTokenPortfolioModalProps>
           tokenMap.set(mint, entry);
         }
 
-        if (balNum > 0) {
-          entry.totalBalance += balNum;
-          entry.totalUsdValue += balNum * entry.usdPrice;
-          entry.holderWallets.push({
-            wallet,
-            balance: tok.balance,
-            usdValue: (balNum * entry.usdPrice).toFixed(2),
-          });
-        }
+        entry.totalBalance += balNum;
+        entry.totalUsdValue += balNum * entry.usdPrice;
+        entry.holderWallets.push({
+          wallet,
+          balance: tok.balance,
+          usdValue: (balNum * entry.usdPrice).toFixed(2),
+        });
       });
     });
 
-    return Array.from(tokenMap.values());
-  }, [solanaWallets, customTrackedMints]);
+    return Array.from(tokenMap.values()).filter(t => t.totalBalance > 0);
+  }, [solanaWallets]);
 
   // Filtered tokens based on search
   const filteredTokens = useMemo(() => {

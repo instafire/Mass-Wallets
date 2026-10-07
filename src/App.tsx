@@ -39,6 +39,8 @@ import { NFTGalleryModal } from './components/NFTGalleryModal';
 import { NFTSendModal } from './components/NFTSendModal';
 import { MassNFTDisperseModal } from './components/MassNFTDisperseModal';
 import { AddNFTModal } from './components/AddNFTModal';
+import { SwitchTreasuryModal } from './components/SwitchTreasuryModal';
+import { WalletHoldingsModal } from './components/WalletHoldingsModal';
 import { Layers, RefreshCw } from 'lucide-react';
 
 export function App() {
@@ -83,10 +85,13 @@ export function App() {
   const [solanaAddressSheetWallets, setSolanaAddressSheetWallets] = useState<ManagedWallet[]>([]);
   const [isSolanaTokenPortfolioOpen, setIsSolanaTokenPortfolioOpen] = useState<boolean>(false);
   const [isSolanaFaucetOpen, setIsSolanaFaucetOpen] = useState<boolean>(false);
+  const [isSwitchTreasuryOpen, setIsSwitchTreasuryOpen] = useState<boolean>(false);
+  const [activeHoldingsWallet, setActiveHoldingsWallet] = useState<ManagedWallet | null>(null);
 
   // Selected Target Wallets for specific modals
   const [activeSendWallet, setActiveSendWallet] = useState<ManagedWallet | null>(null);
   const [presetSendRecipient, setPresetSendRecipient] = useState<string>('');
+  const [presetSendToken, setPresetSendToken] = useState<string>('');
   const [activeReceiveWallet, setActiveReceiveWallet] = useState<ManagedWallet | null>(null);
   const [activeRevealWallet, setActiveRevealWallet] = useState<ManagedWallet | null>(null);
   const [activeHistoryWallet, setActiveHistoryWallet] = useState<ManagedWallet | null>(null);
@@ -119,6 +124,7 @@ export function App() {
 
   const handleSolanaTokenPortfolioSend = (tokenSymbol: string, preselectedWallet?: ManagedWallet) => {
     setIsSolanaTokenPortfolioOpen(false);
+    setPresetSendToken(tokenSymbol);
     if (preselectedWallet) {
       setActiveSendWallet(preselectedWallet);
     } else {
@@ -331,6 +337,24 @@ export function App() {
     showToast(`"${wallets[0].label}" is now designated as Master Treasury!`);
   };
 
+  // Set any selected wallet as Master Treasury
+  const handleSetAsTreasury = (walletId: string) => {
+    const target = wallets.find(w => w.id === walletId);
+    if (!target) return;
+    const updated = wallets.map(w => ({
+      ...w,
+      isMainWallet: w.id === walletId,
+    }));
+    persistWallets(updated);
+    showToast(`"${target.label}" is now designated as Master Treasury!`);
+  };
+
+  // Keep activeHoldingsWallet synchronized with latest wallet data
+  const syncedHoldingsWallet = useMemo(() => {
+    if (!activeHoldingsWallet) return null;
+    return wallets.find(w => w.id === activeHoldingsWallet.id) || activeHoldingsWallet;
+  }, [activeHoldingsWallet, wallets]);
+
   // Add imported wallets
   const handleWalletsImported = (importedWallets: ManagedWallet[]) => {
     const combined = [...wallets, ...importedWallets];
@@ -496,6 +520,8 @@ export function App() {
           onOpenHistory={(w) => setActiveHistoryWallet(w)}
           onSetFirstAsMain={handleSetFirstAsMain}
           onCreateMainWallet={() => setIsCreateVaultOpen(true)}
+          onOpenSwitchTreasury={() => setIsSwitchTreasuryOpen(true)}
+          onViewHoldings={(w) => setActiveHoldingsWallet(w)}
         />
 
         {/* Managed Wallet List & High-Speed Explorer */}
@@ -509,6 +535,8 @@ export function App() {
           onViewHistory={(w) => setActiveHistoryWallet(w)}
           onEditWallet={(w) => setActiveEditWallet(w)}
           onViewNFTs={(w) => handleOpenNFTGallery(w.id)}
+          onViewHoldings={(w) => setActiveHoldingsWallet(w)}
+          onSetAsTreasury={handleSetAsTreasury}
           onDeleteWallet={handleDeleteWallet}
           onDeleteBulkWallets={handleDeleteBulkWallets}
           onOpenMassGenerator={() => setIsMassGeneratorOpen(true)}
@@ -575,11 +603,13 @@ export function App() {
         onClose={() => {
           setActiveSendWallet(null);
           setPresetSendRecipient('');
+          setPresetSendToken('');
         }}
         senderWallet={activeSendWallet}
         allWallets={wallets}
         network={network}
         initialRecipient={presetSendRecipient}
+        initialToken={presetSendToken}
         onTxSent={() => {
           showToast('Transaction sent!');
           handleRefreshBalances();
@@ -855,6 +885,57 @@ export function App() {
         wallets={wallets}
         network={network}
         onAirdropCompleted={handleSolanaAirdropCompleted}
+      />
+
+      {/* Switch Master Treasury Modal */}
+      <SwitchTreasuryModal
+        isOpen={isSwitchTreasuryOpen}
+        onClose={() => setIsSwitchTreasuryOpen(false)}
+        wallets={wallets}
+        currentTreasuryId={mainWallet?.id}
+        network={network}
+        onSelectTreasury={(walletId) => {
+          handleSetAsTreasury(walletId);
+          setIsSwitchTreasuryOpen(false);
+        }}
+      />
+
+      {/* Comprehensive Multi-Chain Wallet Holdings & Asset Breakdown Modal */}
+      <WalletHoldingsModal
+        isOpen={!!syncedHoldingsWallet}
+        onClose={() => setActiveHoldingsWallet(null)}
+        wallet={syncedHoldingsWallet}
+        network={network}
+        onOpenSend={(w, tokenSymbol) => {
+          setActiveHoldingsWallet(null);
+          if (tokenSymbol) {
+            setPresetSendToken(tokenSymbol);
+          }
+          setActiveSendWallet(w);
+        }}
+        onOpenReceive={(w) => {
+          setActiveHoldingsWallet(null);
+          setActiveReceiveWallet(w);
+        }}
+        onOpenKeys={(w) => {
+          setActiveHoldingsWallet(null);
+          setActiveRevealWallet(w);
+        }}
+        onOpenHistory={(w) => {
+          setActiveHoldingsWallet(null);
+          setActiveHistoryWallet(w);
+        }}
+        onOpenEdit={(w) => {
+          setActiveHoldingsWallet(null);
+          setActiveEditWallet(w);
+        }}
+        onOpenSendNFT={(nft, owner) => {
+          setActiveHoldingsWallet(null);
+          handleOpenSendNFT(nft, owner);
+        }}
+        onSetAsTreasury={(walletId) => {
+          handleSetAsTreasury(walletId);
+        }}
       />
 
       {/* Global Toast Notification */}

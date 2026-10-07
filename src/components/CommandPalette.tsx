@@ -329,7 +329,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             <span>↑↓ Navigate</span>
             <span>↵ Select</span>
           </div>
-          <span>TON Mass Wallet Studio</span>
+          <span>Mass Wallet</span>
         </div>
 
       </div>

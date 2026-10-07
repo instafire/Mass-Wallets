@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import type { ManagedWallet, Network } from '../types';
 import { isSolanaWallet } from '../types';
 import { TonService, SUPPORTED_JETTONS } from '../services/tonService';
@@ -39,6 +39,28 @@ export const WalletSweeperModal: React.FC<WalletSweeperModalProps> = ({
   const [sweepProgress, setSweepProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
   const [statuses, setStatuses] = useState<Record<string, { status: 'pending' | 'success' | 'failed'; txHash?: string; error?: string }>>({});
 
+  const targetWallets = (sourceWallets && sourceWallets.length > 0) ? sourceWallets : allWallets;
+
+  // Derive only jettons actually held with positive balance across candidate wallets
+  const availableJettons = useMemo(() => {
+    const map = new Map<string, typeof SUPPORTED_JETTONS[0]>();
+    targetWallets.forEach(w => {
+      w.jettons?.forEach(j => {
+        if (parseFloat(j.balance || '0') > 0 && j.symbol !== 'TON') {
+          const matched = SUPPORTED_JETTONS.find(tj => tj.symbol.toUpperCase() === j.symbol.toUpperCase()) || j;
+          map.set(j.symbol.toUpperCase(), matched as any);
+        }
+      });
+    });
+    return Array.from(map.values());
+  }, [targetWallets]);
+
+  useEffect(() => {
+    if (selectedToken !== 'TON' && !availableJettons.some(j => j.symbol.toUpperCase() === selectedToken.toUpperCase())) {
+      setSelectedToken('TON');
+    }
+  }, [availableJettons, selectedToken]);
+
   if (!isOpen || !mainWallet) return null;
 
   const isSolanaMode = sweepChain === 'solana';
@@ -49,7 +71,7 @@ export const WalletSweeperModal: React.FC<WalletSweeperModalProps> = ({
     ? (solanaWallets.find(w => w.id === (solDestinationId || (isSolanaWallet(mainWallet) ? mainWallet.id : ''))) || null)
     : mainWallet;
 
-  const candidateWallets = (sourceWallets && sourceWallets.length > 0 ? sourceWallets : allWallets)
+  const candidateWallets = targetWallets
     // Chain filter: TON sweeps use TON wallets, Solana sweeps use Solana wallets.
     // Mixing chains feeds a Solana mnemonic into the TON signer (or vice versa).
     .filter(w => isSolanaMode ? isSolanaWallet(w) : !isSolanaWallet(w))
@@ -198,11 +220,11 @@ export const WalletSweeperModal: React.FC<WalletSweeperModalProps> = ({
           {!isSolanaMode && (
           <div>
             <label className="block text-xs font-semibold text-gray-300 mb-1.5">Select Asset to Sweep:</label>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={() => setSelectedToken('TON')}
-                className={`tab-btn flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold ${
+                className={`tab-btn flex items-center justify-center gap-1.5 py-2.5 px-4 text-xs font-bold ${
                   selectedToken === 'TON' ? 'active-primary' : ''
                 }`}
               >
@@ -210,16 +232,16 @@ export const WalletSweeperModal: React.FC<WalletSweeperModalProps> = ({
                 <span>TON</span>
               </button>
 
-              {SUPPORTED_JETTONS.map(j => (
+              {availableJettons.map(j => (
                 <button
                   key={j.symbol}
                   type="button"
                   onClick={() => setSelectedToken(j.symbol)}
-                  className={`tab-btn flex items-center justify-center gap-1 py-2.5 text-xs font-bold ${
+                  className={`tab-btn flex items-center justify-center gap-1 py-2.5 px-4 text-xs font-bold ${
                     selectedToken === j.symbol ? 'active-amber' : ''
                   }`}
                 >
-                  <span>{j.icon}</span>
+                  <span>{j.icon || '🪙'}</span>
                   <span>{j.symbol}</span>
                 </button>
               ))}

@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { ManagedWallet, Network, MassSendItem } from '../types';
 import { isSolanaWallet } from '../types';
-import { TonService, SUPPORTED_JETTONS } from '../services/tonService';
-import { SolanaService, SUPPORTED_SOLANA_TOKENS } from '../services/solanaService';
+import { TonService } from '../services/tonService';
+import { SolanaService } from '../services/solanaService';
 import confetti from 'canvas-confetti';
 import { X, Send, RefreshCw, Users, ShieldAlert } from 'lucide-react';
 
@@ -47,13 +47,21 @@ export const MassSendModal: React.FC<MassSendModalProps> = ({
   const activeSender = senderWallets.find(w => w.id === senderId);
   const isSolanaSender = isSolanaWallet(activeSender);
 
+  // Strictly filter to secondary tokens held with positive balance by sender wallet
+  const heldSecondaryTokens = useMemo(() => {
+    if (!activeSender?.jettons) return [];
+    const nativeSymbol = isSolanaSender ? 'SOL' : 'TON';
+    return activeSender.jettons.filter(j => 
+      j.symbol.toUpperCase() !== nativeSymbol && parseFloat(j.balance || '0') > 0
+    );
+  }, [activeSender, isSolanaSender]);
+
   useEffect(() => {
-    if (isSolanaSender && selectedToken === 'TON') {
-      setSelectedToken('SOL');
-    } else if (!isSolanaSender && selectedToken === 'SOL') {
-      setSelectedToken('TON');
+    const nativeSym = isSolanaSender ? 'SOL' : 'TON';
+    if (selectedToken !== nativeSym && !heldSecondaryTokens.some(t => t.symbol.toUpperCase() === selectedToken.toUpperCase())) {
+      setSelectedToken(nativeSym);
     }
-  }, [isSolanaSender, selectedToken]);
+  }, [heldSecondaryTokens, isSolanaSender, selectedToken]);
 
   useEffect(() => {
     if (preSelectedRecipients.length > 0) {
@@ -251,65 +259,34 @@ export const MassSendModal: React.FC<MassSendModalProps> = ({
           <div>
             <label className="block text-xs font-semibold text-gray-300 mb-1">Asset Token to Disperse:</label>
             <div className="flex flex-wrap gap-1.5">
-              {isSolanaSender ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedToken('SOL')}
-                    className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                      selectedToken === 'SOL' 
-                        ? 'bg-purple-500/20 border-purple-500 text-white shadow-md' 
-                        : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <span>🟣</span> SOL
-                  </button>
+              <button
+                type="button"
+                onClick={() => setSelectedToken(isSolanaSender ? 'SOL' : 'TON')}
+                className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  selectedToken === (isSolanaSender ? 'SOL' : 'TON')
+                    ? (isSolanaSender ? 'bg-purple-500/20 border-purple-500 text-white shadow-md' : 'bg-[#0098EA]/20 border-[#0098EA] text-white shadow-md')
+                    : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
+                }`}
+              >
+                <span>{isSolanaSender ? '🟣' : '💎'}</span> {isSolanaSender ? 'SOL' : 'TON'}
+              </button>
 
-                  {SUPPORTED_SOLANA_TOKENS.slice(1).map(t => (
-                    <button
-                      key={t.symbol}
-                      type="button"
-                      onClick={() => setSelectedToken(t.symbol)}
-                      className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                        selectedToken === t.symbol 
-                          ? 'bg-amber-500/20 border-amber-500 text-white shadow-md' 
-                          : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <span>{t.icon}</span> {t.symbol}
-                    </button>
-                  ))}
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedToken('TON')}
-                    className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                      selectedToken === 'TON' 
-                        ? 'bg-[#0098EA]/20 border-[#0098EA] text-white shadow-md' 
-                        : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <span>💎</span> TON
-                  </button>
-
-                  {SUPPORTED_JETTONS.map(j => (
-                    <button
-                      key={j.symbol}
-                      type="button"
-                      onClick={() => setSelectedToken(j.symbol)}
-                      className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                        selectedToken === j.symbol 
-                          ? 'bg-amber-500/20 border-amber-500 text-white shadow-md' 
-                          : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <span>{j.icon}</span> {j.symbol}
-                    </button>
-                  ))}
-                </>
-              )}
+              {heldSecondaryTokens.map(t => (
+                <button
+                  key={t.symbol}
+                  type="button"
+                  onClick={() => setSelectedToken(t.symbol)}
+                  className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    selectedToken.toUpperCase() === t.symbol.toUpperCase()
+                      ? 'bg-amber-500/20 border-amber-500 text-white shadow-md' 
+                      : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
+                  }`}
+                  title={`${t.balance} ${t.symbol}`}
+                >
+                  <span>{t.icon || '🪙'}</span> {t.symbol}
+                  <span className="text-[10px] text-gray-400 font-mono ml-0.5">({t.balance})</span>
+                </button>
+              ))}
             </div>
           </div>
 

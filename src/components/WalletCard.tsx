@@ -13,7 +13,8 @@ import {
   Edit3, 
   Tag, 
   Crown,
-  ShieldCheck
+  ShieldCheck,
+  Coins
 } from 'lucide-react';
 
 interface WalletCardProps {
@@ -26,6 +27,8 @@ interface WalletCardProps {
   onViewHistory: (wallet: ManagedWallet) => void;
   onEditWallet?: (wallet: ManagedWallet) => void;
   onViewNFTs?: (wallet: ManagedWallet) => void;
+  onViewHoldings?: (wallet: ManagedWallet) => void;
+  onSetAsTreasury?: (walletId: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -39,6 +42,8 @@ const WalletCardComponent: React.FC<WalletCardProps> = ({
   onViewHistory,
   onEditWallet,
   onViewNFTs,
+  onViewHoldings,
+  onSetAsTreasury,
   onDelete,
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
@@ -111,10 +116,24 @@ const WalletCardComponent: React.FC<WalletCardProps> = ({
 
               <h4 className="font-bold text-white text-sm tracking-tight truncate max-w-[140px]">{wallet.label}</h4>
 
-              {wallet.isMainWallet && (
-                <span className="badge badge-gold flex items-center gap-0.5 text-[9px] py-0">
+              {wallet.isMainWallet ? (
+                <span className="badge badge-gold flex items-center gap-0.5 text-[9px] py-0" title="Active Master Treasury">
                   <Crown className="w-2.5 h-2.5" /> Treasury
                 </span>
+              ) : (
+                onSetAsTreasury && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSetAsTreasury(wallet.id);
+                    }}
+                    className="text-gray-500 hover:text-amber-400 p-0.5 rounded transition-all flex items-center text-[10px] hover:bg-amber-500/10"
+                    title="Set as Master Treasury"
+                  >
+                    <Crown className="w-3 h-3" />
+                  </button>
+                )
               )}
               
               <span className={`badge text-[10px] py-0 ${getVersionBadgeClass(wallet.version)}`}>
@@ -185,7 +204,13 @@ const WalletCardComponent: React.FC<WalletCardProps> = ({
 
       {/* Balance Display */}
       <div className="space-y-2 mb-4">
-        <div className="bg-[#080d1a] p-3 rounded-xl border border-white/5 flex items-center justify-between">
+        <div 
+          onClick={() => onViewHoldings && onViewHoldings(wallet)}
+          className={`bg-[#080d1a] p-3 rounded-xl border border-white/5 flex items-center justify-between transition-all ${
+            onViewHoldings ? 'cursor-pointer hover:border-cyan-500/40 hover:bg-[#0c1428]' : ''
+          }`}
+          title={onViewHoldings ? "Click to view full holdings & portfolio" : undefined}
+        >
           <div>
             <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider flex items-center gap-1">
               <span>{isSolana ? '🟣' : '💎'}</span> {isSolana ? 'SOL Balance' : 'TON Balance'}
@@ -211,7 +236,14 @@ const WalletCardComponent: React.FC<WalletCardProps> = ({
         {activeTokens.length > 0 && (
           <div className="space-y-1">
             {activeTokens.map(j => (
-              <div key={j.symbol} className="bg-[#121b30] px-2.5 py-1.5 rounded-lg border border-white/5 flex items-center justify-between text-xs">
+              <div 
+                key={j.symbol}
+                onClick={() => onViewHoldings && onViewHoldings(wallet)}
+                className={`bg-[#121b30] px-2.5 py-1.5 rounded-lg border border-white/5 flex items-center justify-between text-xs transition-all ${
+                  onViewHoldings ? 'cursor-pointer hover:border-cyan-500/30' : ''
+                }`}
+                title={onViewHoldings ? `Click to view ${j.symbol} holdings` : undefined}
+              >
                 <div className="flex items-center gap-1.5 truncate pr-2">
                   <span className="text-gray-300 font-semibold">{j.icon || '🪙'} {j.symbol}</span>
                   {j.jettonAddress?.endsWith('pump') && (
@@ -245,7 +277,18 @@ const WalletCardComponent: React.FC<WalletCardProps> = ({
       </div>
 
       {/* Action Buttons Grid */}
-      <div className="grid grid-cols-4 gap-2 pt-2 border-t border-white/10">
+      <div className={`grid ${onViewHoldings ? 'grid-cols-5 gap-1.5' : 'grid-cols-4 gap-2'} pt-2 border-t border-white/10`}>
+        {onViewHoldings && (
+          <button
+            onClick={() => onViewHoldings(wallet)}
+            className="btn btn-secondary btn-sm flex flex-col items-center justify-center py-2 gap-1 text-xs text-cyan-400 hover:text-cyan-300 hover:border-cyan-500/30"
+            title="View All Holdings & Tokens"
+          >
+            <Coins className="w-3.5 h-3.5" />
+            <span className="text-[10px]">Holdings</span>
+          </button>
+        )}
+
         <button
           onClick={() => onSend(wallet)}
           className="btn btn-secondary btn-sm flex flex-col items-center justify-center py-2 gap-1 text-xs"

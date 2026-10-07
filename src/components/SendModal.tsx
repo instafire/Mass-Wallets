@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { ManagedWallet, Network } from '../types';
 import { TonService, SUPPORTED_JETTONS } from '../services/tonService';
-import { SolanaService, SUPPORTED_SOLANA_TOKENS } from '../services/solanaService';
+import { SolanaService } from '../services/solanaService';
 import confetti from 'canvas-confetti';
 import { X, Send, Smartphone, AlertCircle, CheckCircle2, ExternalLink, Lock } from 'lucide-react';
 
@@ -12,6 +12,7 @@ interface SendModalProps {
   allWallets: ManagedWallet[];
   network: Network;
   initialRecipient?: string;
+  initialToken?: string;
   onTxSent: () => void;
 }
 
@@ -22,6 +23,7 @@ export const SendModal: React.FC<SendModalProps> = ({
   allWallets,
   network,
   initialRecipient = '',
+  initialToken,
   onTxSent,
 }) => {
   const [selectedWalletId, setSelectedWalletId] = useState<string>('');
@@ -45,20 +47,31 @@ export const SendModal: React.FC<SendModalProps> = ({
       if (initialRecipient) {
         setRecipient(initialRecipient);
       }
+      if (initialToken) {
+        setSelectedToken(initialToken);
+      }
       setTxResult(null);
     }
-  }, [isOpen, initialRecipient]);
+  }, [isOpen, initialRecipient, initialToken]);
 
   const currentWallet = allWallets.find(w => w.id === selectedWalletId) || senderWallet;
   const isSolana = currentWallet?.chain === 'solana' || currentWallet?.version === 'solana-ed25519' || currentWallet?.version === 'squads-v4';
 
+  // Strictly filter to secondary tokens held with positive balance
+  const heldSecondaryTokens = useMemo(() => {
+    if (!currentWallet?.jettons) return [];
+    const nativeSymbol = isSolana ? 'SOL' : 'TON';
+    return currentWallet.jettons.filter(j => 
+      j.symbol.toUpperCase() !== nativeSymbol && parseFloat(j.balance || '0') > 0
+    );
+  }, [currentWallet, isSolana]);
+
   useEffect(() => {
-    if (isSolana && selectedToken === 'TON') {
-      setSelectedToken('SOL');
-    } else if (!isSolana && selectedToken === 'SOL') {
-      setSelectedToken('TON');
+    const nativeSym = isSolana ? 'SOL' : 'TON';
+    if (selectedToken !== nativeSym && !heldSecondaryTokens.some(t => t.symbol.toUpperCase() === selectedToken.toUpperCase())) {
+      setSelectedToken(nativeSym);
     }
-  }, [isSolana, selectedToken]);
+  }, [heldSecondaryTokens, isSolana, selectedToken]);
 
   if (!isOpen) return null;
 
@@ -228,64 +241,36 @@ export const SendModal: React.FC<SendModalProps> = ({
           <div>
             <label className="block text-xs font-semibold text-gray-300 mb-1">Select Asset Token:</label>
             <div className="flex flex-wrap gap-1.5">
-              {isSolana ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedToken('SOL')}
-                    className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                      selectedToken === 'SOL' 
-                        ? 'bg-purple-500/20 border-purple-500 text-white shadow-md' 
-                        : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <span>🟣</span> SOL
-                  </button>
-                  {SUPPORTED_SOLANA_TOKENS.slice(1).map(t => (
-                    <button
-                      key={t.symbol}
-                      type="button"
-                      onClick={() => setSelectedToken(t.symbol)}
-                      className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                        selectedToken === t.symbol 
-                          ? 'bg-amber-500/20 border-amber-500 text-white shadow-md' 
-                          : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <span>{t.icon}</span> {t.symbol}
-                    </button>
-                  ))}
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedToken('TON')}
-                    className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                      selectedToken === 'TON' 
-                        ? 'bg-[#0098EA]/20 border-[#0098EA] text-white shadow-md' 
-                        : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <span>💎</span> TON
-                  </button>
+              {/* Native Currency */}
+              <button
+                type="button"
+                onClick={() => setSelectedToken(isSolana ? 'SOL' : 'TON')}
+                className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  selectedToken === (isSolana ? 'SOL' : 'TON')
+                    ? (isSolana ? 'bg-purple-500/20 border-purple-500 text-white shadow-md' : 'bg-[#0098EA]/20 border-[#0098EA] text-white shadow-md')
+                    : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
+                }`}
+              >
+                <span>{isSolana ? '🟣' : '💎'}</span> {isSolana ? 'SOL' : 'TON'}
+              </button>
 
-                  {SUPPORTED_JETTONS.map(j => (
-                    <button
-                      key={j.symbol}
-                      type="button"
-                      onClick={() => setSelectedToken(j.symbol)}
-                      className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                        selectedToken === j.symbol 
-                          ? 'bg-amber-500/20 border-amber-500 text-white shadow-md' 
-                          : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <span>{j.icon}</span> {j.symbol}
-                    </button>
-                  ))}
-                </>
-              )}
+              {/* Only Secondary Tokens Held by this Wallet */}
+              {heldSecondaryTokens.map(t => (
+                <button
+                  key={t.symbol}
+                  type="button"
+                  onClick={() => setSelectedToken(t.symbol)}
+                  className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    selectedToken.toUpperCase() === t.symbol.toUpperCase()
+                      ? 'bg-amber-500/20 border-amber-500 text-white shadow-md' 
+                      : 'bg-[#121b30] border-white/10 text-gray-400 hover:text-white'
+                  }`}
+                  title={`${t.balance} ${t.symbol}`}
+                >
+                  <span>{t.icon || '🪙'}</span> {t.symbol}
+                  <span className="text-[10px] text-gray-400 font-mono ml-0.5">({t.balance})</span>
+                </button>
+              ))}
             </div>
           </div>
 

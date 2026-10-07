@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { ManagedWallet, Network } from '../types';
 import { isSolanaWallet } from '../types';
 import { TonService, SUPPORTED_JETTONS } from '../services/tonService';
-import { SolanaService, SUPPORTED_SOLANA_TOKENS } from '../services/solanaService';
+import { SolanaService } from '../services/solanaService';
 import confetti from 'canvas-confetti';
 import { 
   X, 
@@ -51,13 +51,21 @@ export const MainWalletDistributeModal: React.FC<MainWalletDistributeModalProps>
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [executionProgress, setExecutionProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
 
+  // Strictly filter to secondary tokens held with positive balance by main treasury
+  const heldSecondaryTokens = useMemo(() => {
+    if (!mainWallet?.jettons) return [];
+    const nativeSymbol = isSolana ? 'SOL' : 'TON';
+    return mainWallet.jettons.filter(j => 
+      j.symbol.toUpperCase() !== nativeSymbol && parseFloat(j.balance || '0') > 0
+    );
+  }, [mainWallet, isSolana]);
+
   useEffect(() => {
-    if (isSolana && selectedToken === 'TON') {
-      setSelectedToken('SOL');
-    } else if (!isSolana && selectedToken === 'SOL') {
-      setSelectedToken('TON');
+    const nativeSym = isSolana ? 'SOL' : 'TON';
+    if (selectedToken !== nativeSym && !heldSecondaryTokens.some(t => t.symbol.toUpperCase() === selectedToken.toUpperCase())) {
+      setSelectedToken(nativeSym);
     }
-  }, [isSolana, selectedToken]);
+  }, [heldSecondaryTokens, isSolana, selectedToken]);
 
   if (!isOpen || !mainWallet) return null;
 
@@ -242,60 +250,33 @@ export const MainWalletDistributeModal: React.FC<MainWalletDistributeModalProps>
             {/* Asset Selection Tabs */}
           <div>
             <label className="block text-xs font-semibold text-gray-300 mb-1.5">Select Asset to Distribute:</label>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {isSolana ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedToken('SOL')}
-                    className={`tab-btn flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold ${
-                      selectedToken === 'SOL' ? 'active-primary' : ''
-                    }`}
-                  >
-                    <span>🟣</span>
-                    <span>SOL</span>
-                  </button>
-                  {SUPPORTED_SOLANA_TOKENS.slice(1).map(s => (
-                    <button
-                      key={s.symbol}
-                      type="button"
-                      onClick={() => setSelectedToken(s.symbol)}
-                      className={`tab-btn flex items-center justify-center gap-1 py-2.5 text-xs font-bold ${
-                        selectedToken === s.symbol ? 'active-amber' : ''
-                      }`}
-                    >
-                      <span>{s.icon}</span>
-                      <span>{s.symbol}</span>
-                    </button>
-                  ))}
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedToken('TON')}
-                    className={`tab-btn flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold ${
-                      selectedToken === 'TON' ? 'active-primary' : ''
-                    }`}
-                  >
-                    <span>💎</span>
-                    <span>TON</span>
-                  </button>
-                  {SUPPORTED_JETTONS.map(j => (
-                    <button
-                      key={j.symbol}
-                      type="button"
-                      onClick={() => setSelectedToken(j.symbol)}
-                      className={`tab-btn flex items-center justify-center gap-1 py-2.5 text-xs font-bold ${
-                        selectedToken === j.symbol ? 'active-amber' : ''
-                      }`}
-                    >
-                      <span>{j.icon}</span>
-                      <span>{j.symbol}</span>
-                    </button>
-                  ))}
-                </>
-              )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedToken(isSolana ? 'SOL' : 'TON')}
+                className={`tab-btn flex items-center justify-center gap-1.5 py-2.5 px-4 text-xs font-bold ${
+                  selectedToken === (isSolana ? 'SOL' : 'TON') ? 'active-primary' : ''
+                }`}
+              >
+                <span>{isSolana ? '🟣' : '💎'}</span>
+                <span>{isSolana ? 'SOL' : 'TON'}</span>
+              </button>
+
+              {heldSecondaryTokens.map(s => (
+                <button
+                  key={s.symbol}
+                  type="button"
+                  onClick={() => setSelectedToken(s.symbol)}
+                  className={`tab-btn flex items-center justify-center gap-1 py-2.5 px-4 text-xs font-bold ${
+                    selectedToken.toUpperCase() === s.symbol.toUpperCase() ? 'active-amber' : ''
+                  }`}
+                  title={`${s.balance} ${s.symbol}`}
+                >
+                  <span>{s.icon || '🪙'}</span>
+                  <span>{s.symbol}</span>
+                  <span className="text-[10px] text-gray-400 font-mono ml-0.5">({s.balance})</span>
+                </button>
+              ))}
             </div>
           </div>
 

@@ -197,7 +197,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/health' || pathname === '/api/ping') {
     return sendJson(res, 200, {
       status: 'ok',
-      app: 'TON Mass Wallet Studio',
+      app: 'Mass Wallet',
       version: '2.0.0',
       uptime: process.uptime(),
       port,
@@ -446,7 +446,7 @@ function sanitizeWallets(wallets) {
 // Start Server (loopback only — see HOST note above)
 server.listen(port, host, () => {
   console.log(`=======================================================`);
-  console.log(`  TON Mass Wallet Studio - Production Server Running  `);
+  console.log(`  Mass Wallet - Production Server Running              `);
   console.log(`  Local URL:   http://localhost:${port}               `);
   console.log(`  Bound to:    ${host} (loopback only by default)     `);
   console.log(`  Static Root: ${DIST_DIR}                           `);

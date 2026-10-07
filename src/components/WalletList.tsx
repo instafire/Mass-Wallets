@@ -61,6 +61,8 @@ interface WalletListProps {
   onOpenSolanaAddressSheet?: (wallets: ManagedWallet[]) => void;
   onOpenSolanaTokenPortfolio?: () => void;
   onOpenSolanaFaucet?: () => void;
+  onViewHoldings?: (wallet: ManagedWallet) => void;
+  onSetAsTreasury?: (walletId: string) => void;
 }
 
 type ViewMode = "matrix" | "batches" | "grid";
@@ -77,6 +79,8 @@ export const WalletList: React.FC<WalletListProps> = ({
   onViewHistory,
   onEditWallet,
   onViewNFTs,
+  onViewHoldings,
+  onSetAsTreasury,
   onDeleteWallet,
   onDeleteBulkWallets,
   onOpenMassGenerator,
@@ -145,6 +149,21 @@ export const WalletList: React.FC<WalletListProps> = ({
   // Low gas = balance > 0 and < 0.005 TON (excluding main treasury)
   const lowGasCount = useMemo(() => wallets.filter(w => { const b = parseFloat(w.balance || "0"); return b > 0 && b < 0.005 && !w.isMainWallet; }).length, [wallets]);
   const nftWalletsCount = useMemo(() => wallets.filter(w => w.nfts && w.nfts.length > 0).length, [wallets]);
+
+  // Dynamically derive only tokens that wallets actually hold with positive balance
+  const availableHeldTokens = useMemo(() => {
+    const map = new Map<string, { symbol: string; name?: string; icon?: string }>();
+    wallets.forEach(w => {
+      w.jettons?.forEach(j => {
+        if (parseFloat(j.balance || '0') > 0 && j.symbol !== 'TON' && j.symbol !== 'SOL') {
+          if (!map.has(j.symbol.toUpperCase())) {
+            map.set(j.symbol.toUpperCase(), { symbol: j.symbol, name: j.name, icon: j.icon });
+          }
+        }
+      });
+    });
+    return Array.from(map.values());
+  }, [wallets]);
 
   // Reset page to 1 on filter changes
   useEffect(() => {
@@ -694,24 +713,22 @@ export const WalletList: React.FC<WalletListProps> = ({
               <option value="squads-v4">Squads Protocol v4</option>
             </select>
 
-            {/* Token Asset Filter */}
-            <select
-              value={selectedTokenFilter}
-              onChange={(e) => setSelectedTokenFilter(e.target.value)}
-              className="input-field py-1.5 text-xs w-32 bg-[#121b30] text-amber-300 font-semibold"
-            >
-              <option value="all">All Tokens</option>
-              <option value="MYA">💊 MYA (askmya)</option>
-              <option value="USDC">USDC</option>
-              <option value="USDT">USDT</option>
-              <option value="BONK">BONK</option>
-              <option value="JUP">JUP</option>
-              <option value="RAY">RAY</option>
-              <option value="WIF">WIF</option>
-              <option value="PYTH">PYTH</option>
-              <option value="NOT">NOT</option>
-              <option value="DOGS">DOGS</option>
-            </select>
+            {/* Token Asset Filter (Only shows tokens held by at least one wallet) */}
+            {availableHeldTokens.length > 0 && (
+              <select
+                value={selectedTokenFilter}
+                onChange={(e) => setSelectedTokenFilter(e.target.value)}
+                className="input-field py-1.5 text-xs w-36 bg-[#121b30] text-amber-300 font-semibold"
+                title="Filter by held token asset"
+              >
+                <option value="all">All Tokens ({availableHeldTokens.length})</option>
+                {availableHeldTokens.map(t => (
+                  <option key={t.symbol} value={t.symbol}>
+                    {t.icon || '🪙'} {t.symbol}
+                  </option>
+                ))}
+              </select>
+            )}
 
             {/* Sort Order */}
             <select
@@ -993,9 +1010,19 @@ export const WalletList: React.FC<WalletListProps> = ({
                       <td className="p-3">
                         <div className="flex items-center gap-1.5">
                           {wallet.isMainWallet && (
-                            <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span title="Master Treasury" className="inline-flex items-center">
+                              <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            </span>
                           )}
-                          <span className="font-bold text-white text-sm tracking-tight">{wallet.label}</span>
+                          <span 
+                            onClick={() => onViewHoldings && onViewHoldings(wallet)}
+                            className={`font-bold text-white text-sm tracking-tight ${
+                              onViewHoldings ? 'cursor-pointer hover:text-cyan-400 transition-colors' : ''
+                            }`}
+                            title={onViewHoldings ? "Click to view full portfolio & holdings" : undefined}
+                          >
+                            {wallet.label}
+                          </span>
                           {onEditWallet && (
                             <button
                               onClick={() => onEditWallet(wallet)}
@@ -1056,7 +1083,11 @@ export const WalletList: React.FC<WalletListProps> = ({
                       </td>
 
                       {/* Balance */}
-                      <td className="p-3 text-right">
+                      <td 
+                        className={`p-3 text-right ${onViewHoldings ? 'cursor-pointer hover:bg-white/5 transition-colors' : ''}`}
+                        onClick={() => onViewHoldings && onViewHoldings(wallet)}
+                        title={onViewHoldings ? "Click to view full portfolio & holdings" : undefined}
+                      >
                         <div>
                           <span className={"font-mono font-black text-sm " + (balanceNum > 0 ? "text-emerald-400" : "text-gray-400")}>
                             {wallet.balance}
@@ -1103,6 +1134,24 @@ export const WalletList: React.FC<WalletListProps> = ({
                       {/* Action Shortcuts */}
                       <td className="p-3 text-center">
                         <div className="flex items-center justify-center gap-1">
+                          {onViewHoldings && (
+                            <button
+                              onClick={() => onViewHoldings(wallet)}
+                              className="btn btn-secondary btn-sm p-1.5 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10"
+                              title="View All Holdings & Tokens"
+                            >
+                              <Coins className="w-3 h-3" />
+                            </button>
+                          )}
+                          {!wallet.isMainWallet && onSetAsTreasury && (
+                            <button
+                              onClick={() => onSetAsTreasury(wallet.id)}
+                              className="btn btn-secondary btn-sm p-1.5 text-gray-400 hover:text-amber-400 hover:bg-amber-500/10"
+                              title="Set as Master Treasury"
+                            >
+                              <Crown className="w-3 h-3" />
+                            </button>
+                          )}
                           <button
                             onClick={() => onSend(wallet)}
                             className="btn btn-primary btn-sm p-1.5"
@@ -1250,22 +1299,37 @@ export const WalletList: React.FC<WalletListProps> = ({
                                 />
                               </td>
                               <td className="p-2.5 text-center font-mono text-gray-500 font-bold">#{originalIdx}</td>
-                              <td className="p-2.5 font-bold text-white">{w.label}</td>
+                              <td 
+                                onClick={() => onViewHoldings && onViewHoldings(w)}
+                                className={`p-2.5 font-bold text-white ${onViewHoldings ? 'cursor-pointer hover:text-cyan-400 transition-colors' : ''}`}
+                                title={onViewHoldings ? "View wallet holdings" : undefined}
+                              >
+                                {w.label}
+                              </td>
                               <td className="p-2.5 font-mono text-gray-300">
                                 {w.address.substring(0, 8)}...{w.address.substring(w.address.length - 6)}
                               </td>
                               <td className="p-2.5 text-center">
                                 <span className="badge badge-primary">{w.version}</span>
                               </td>
-                              <td className="p-2.5 text-right font-mono font-bold text-emerald-400">
+                              <td 
+                                onClick={() => onViewHoldings && onViewHoldings(w)}
+                                className={`p-2.5 text-right font-mono font-bold text-emerald-400 ${onViewHoldings ? 'cursor-pointer hover:underline' : ''}`}
+                                title={onViewHoldings ? "View wallet holdings" : undefined}
+                              >
                                 {w.balance} TON
                               </td>
                               <td className="p-2.5 text-center">
                                 <div className="flex items-center justify-center gap-1">
-                                  <button onClick={() => onSend(w)} className="btn btn-primary btn-sm p-1">
+                                  {onViewHoldings && (
+                                    <button onClick={() => onViewHoldings(w)} className="btn btn-secondary btn-sm p-1 text-cyan-400" title="View Holdings">
+                                      <Coins className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                  <button onClick={() => onSend(w)} className="btn btn-primary btn-sm p-1" title="Send">
                                     <Send className="w-3 h-3" />
                                   </button>
-                                  <button onClick={() => onRevealMnemonic(w)} className="btn btn-secondary btn-sm p-1 text-amber-400">
+                                  <button onClick={() => onRevealMnemonic(w)} className="btn btn-secondary btn-sm p-1 text-amber-400" title="Keys">
                                     <Key className="w-3 h-3" />
                                   </button>
                                 </div>
@@ -1299,6 +1363,8 @@ export const WalletList: React.FC<WalletListProps> = ({
               onViewHistory={onViewHistory}
               onEditWallet={onEditWallet}
               onViewNFTs={onViewNFTs}
+              onViewHoldings={onViewHoldings}
+              onSetAsTreasury={onSetAsTreasury}
               onDelete={onDeleteWallet}
             />
           ))}

@@ -17,7 +17,6 @@ import {
   Coins
 } from 'lucide-react';
 import { PriceService, type PriceData } from '../services/priceService';
-import { SUPPORTED_JETTONS } from '../services/tonService';
 import { SUPPORTED_SOLANA_TOKENS } from '../services/solanaService';
 
 interface MainTreasuryCardProps {
@@ -34,6 +33,8 @@ interface MainTreasuryCardProps {
   onOpenHistory: (wallet: ManagedWallet) => void;
   onSetFirstAsMain: () => void;
   onCreateMainWallet: () => void;
+  onOpenSwitchTreasury?: () => void;
+  onViewHoldings?: (wallet: ManagedWallet) => void;
 }
 
 export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
@@ -49,6 +50,8 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
   onOpenHistory,
   onSetFirstAsMain,
   onCreateMainWallet,
+  onOpenSwitchTreasury,
+  onViewHoldings,
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
   const [priceData, setPriceData] = useState<PriceData>(PriceService.getPrices());
@@ -143,6 +146,17 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
                   <span className={isSolana ? "badge bg-[#9945FF]/20 text-[#14F195] border border-[#14F195]/30 font-bold" : "badge badge-gold font-bold"}>
                     {isSolana ? '👑 Solana Master Treasury' : '👑 Master Treasury'}
                   </span>
+                  {onOpenSwitchTreasury && allWallets.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={onOpenSwitchTreasury}
+                      className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 transition-all flex items-center gap-1 shadow-sm"
+                      title="Switch Master Treasury to another wallet"
+                    >
+                      <Crown className="w-2.5 h-2.5 text-amber-400" />
+                      <span>Switch Treasury</span>
+                    </button>
+                  )}
                   <span className="badge badge-primary">{mainWallet.version}</span>
                   {isSolana && mainWallet.squadsVaultAddress && (
                     <span className="badge bg-purple-500/20 text-purple-300 font-mono text-[10px]" title={`Squads v4 Vault PDA: ${mainWallet.squadsVaultAddress}`}>
@@ -166,54 +180,29 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
               </div>
             </div>
 
-            {/* Token Assets Mini-Bar */}
+            {/* Token Assets Mini-Bar - Displays ONLY held tokens */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
               <div className="flex items-center gap-1.5 text-[11px] text-gray-400 bg-[#070a14] px-2.5 py-1 rounded-lg border border-white/5">
                 <Coins className={`w-3 h-3 ${isSolana ? 'text-purple-400' : 'text-[#0098EA]'}`} />
                 <span className="font-semibold text-gray-300">Vault Assets:</span>
               </div>
-              {isSolana ? (
-                <>
-                  {activeTokens.map(t => (
-                    <span 
-                      key={t.symbol} 
-                      className="inline-flex items-center gap-1 bg-amber-500/15 text-[11px] font-mono px-2 py-0.5 rounded-lg border border-amber-500/40 text-amber-300 font-bold shadow-sm"
-                      title={t.name}
-                    >
-                      <span>{t.icon || '🪙'}</span>
-                      <span>{parseFloat(t.balance || '0').toLocaleString()}</span>
-                      <span className="text-amber-400 text-[10px]">{t.symbol}</span>
-                      {t.jettonAddress?.endsWith('pump') && (
-                        <span className="text-[8px] bg-emerald-500/20 text-emerald-300 px-1 rounded ml-0.5">pump</span>
-                      )}
-                    </span>
-                  ))}
-                  {SUPPORTED_SOLANA_TOKENS.filter(s => s.symbol !== 'SOL' && !activeTokens.some(at => at.symbol === s.symbol)).slice(0, 3).map(s => (
-                    <span 
-                      key={s.symbol} 
-                      className="inline-flex items-center gap-1 bg-[#070a14] text-[11px] font-mono px-2 py-0.5 rounded-lg border border-white/5 text-gray-400"
-                    >
-                      <span>{s.icon}</span>
-                      <span className="font-bold">0.00</span>
-                      <span className="text-gray-500 text-[10px]">{s.symbol}</span>
-                    </span>
-                  ))}
-                </>
+              {activeTokens.length > 0 ? (
+                activeTokens.map(t => (
+                  <span 
+                    key={t.symbol} 
+                    className="inline-flex items-center gap-1 bg-amber-500/15 text-[11px] font-mono px-2 py-0.5 rounded-lg border border-amber-500/40 text-amber-300 font-bold shadow-sm"
+                    title={t.name}
+                  >
+                    <span>{t.icon || '🪙'}</span>
+                    <span>{parseFloat(t.balance || '0').toLocaleString()}</span>
+                    <span className="text-amber-400 text-[10px]">{t.symbol}</span>
+                    {t.jettonAddress?.endsWith('pump') && (
+                      <span className="text-[8px] bg-emerald-500/20 text-emerald-300 px-1 rounded ml-0.5">pump</span>
+                    )}
+                  </span>
+                ))
               ) : (
-                SUPPORTED_JETTONS.slice(0, 4).map(j => {
-                  const heldJetton = mainWallet.jettons?.find(x => x.symbol === j.symbol);
-                  const bal = heldJetton ? parseFloat(heldJetton.balance || '0') : 0;
-                  return (
-                    <span 
-                      key={j.symbol} 
-                      className={`inline-flex items-center gap-1 ${bal > 0 ? 'bg-amber-500/15 text-amber-300 border-amber-500/40 font-bold' : 'bg-[#070a14] text-gray-300 border-white/5'} text-[11px] font-mono px-2 py-0.5 rounded-lg border`}
-                    >
-                      <span>{j.icon}</span>
-                      <span className="font-bold">{bal > 0 ? bal.toLocaleString() : '0.00'}</span>
-                      <span className="text-gray-500 text-[10px]">{j.symbol}</span>
-                    </span>
-                  );
-                })
+                <span className="text-gray-500 text-[11px] italic">No secondary tokens held</span>
               )}
             </div>
 
@@ -283,6 +272,18 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
                     View
                   </button>
                 )}
+              </div>
+            )}
+
+            {onViewHoldings && (
+              <div className="mt-2.5 pt-2 border-t border-white/10 text-center sm:text-left">
+                <button
+                  type="button"
+                  onClick={() => onViewHoldings(mainWallet)}
+                  className="text-[11px] text-[#0098EA] hover:text-[#38bdf8] font-bold flex items-center gap-1 mx-auto sm:mx-0 transition-colors cursor-pointer"
+                >
+                  <span>View All Holdings & Assets →</span>
+                </button>
               </div>
             )}
           </div>

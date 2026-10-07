@@ -123,15 +123,14 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-base sm:text-lg font-black tracking-tight text-white flex items-center gap-1.5 whitespace-nowrap">
-                  <span>TON Mass Wallet</span>
-                  <span className="text-[#0098EA]">Studio</span>
+                  <span>Mass Wallet</span>
                 </h1>
                 <span className="hidden sm:inline-flex badge badge-primary text-[10px] py-0.5 px-2">
                   Pro v2.0
                 </span>
               </div>
               <p className="text-[11px] text-gray-400 hidden md:block">
-                Institutional Bulk TON & Token Engine
+                Multi-Chain Institutional Bulk Wallet Engine
               </p>
             </div>
           </div>
