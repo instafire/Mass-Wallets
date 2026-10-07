@@ -132,7 +132,7 @@ export const StatsBanner: React.FC<StatsBannerProps> = ({ wallets, network: _net
         <div className="flex items-center gap-3 shrink-0">
           {/* TON Price */}
           <div className="flex items-center gap-1.5">
-            <span className="text-gray-400 text-[11px]">TON:</span>
+            <span className="text-[#0098EA] text-[11px] font-bold">TON:</span>
             <strong className="text-white font-bold font-mono">${(priceData.tonUsd || 0).toFixed(2)}</strong>
             <span className={`text-[10px] font-bold flex items-center ${(priceData.change24h || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               {(priceData.change24h || 0) >= 0 ? <TrendingUp className="w-2.5 h-2.5 mr-0.5" /> : <TrendingDown className="w-2.5 h-2.5 mr-0.5" />}

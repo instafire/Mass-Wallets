@@ -10,22 +10,22 @@ export interface PriceData {
 }
 
 const DEFAULT_PRICES: PriceData = {
-  tonUsd: 5.42,
-  change24h: 3.85,
-  solUsd: 154.20,
-  change24hSol: 2.15,
+  tonUsd: 1.44,
+  change24h: -5.10,
+  solUsd: 115.80,
+  change24hSol: -4.15,
   tokens: {
-    TON: 5.42,
-    SOL: 154.20,
+    TON: 1.44,
+    SOL: 115.80,
     USDT: 1.00,
     USDC: 1.00,
-    NOT: 0.0078,
-    DOGS: 0.00065,
+    NOT: 0.00045,
+    DOGS: 0.000044,
     HMSTR: 0.0038,
     GRAM: 0.0115,
     TONGRAM: 0.045,
-    BONK: 0.000021,
-    JUP: 0.85,
+    BONK: 0.0000035,
+    JUP: 0.32,
     RAY: 1.75,
     WIF: 2.35,
     PYTH: 0.38,
@@ -39,6 +39,7 @@ export class PriceService {
   private static currentPrices: PriceData = DEFAULT_PRICES;
   private static listeners: Set<(prices: PriceData) => void> = new Set();
   private static isFetching = false;
+  private static pollTimer: ReturnType<typeof setInterval> | null = null;
 
   public static getPrices(): PriceData {
     return this.currentPrices;
@@ -47,7 +48,23 @@ export class PriceService {
   public static subscribe(listener: (prices: PriceData) => void): () => void {
     this.listeners.add(listener);
     listener(this.currentPrices);
-    return () => this.listeners.delete(listener);
+
+    if (this.listeners.size === 1) {
+      this.fetchLatestPrices();
+      if (!this.pollTimer) {
+        this.pollTimer = setInterval(() => {
+          this.fetchLatestPrices();
+        }, 45000);
+      }
+    }
+
+    return () => {
+      this.listeners.delete(listener);
+      if (this.listeners.size === 0 && this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+    };
   }
 
   public static async fetchLatestPrices(): Promise<PriceData> {
@@ -55,7 +72,7 @@ export class PriceService {
     this.isFetching = true;
 
     try {
-      // Query CoinGecko public API for TON & Solana
+      // 1. Try CoinGecko public API
       const resp = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=the-open-network,solana,notcoin,dogs-2,bonk,jupiter-exchange-solana&vs_currencies=usd&include_24hr_change=true');
       
       let myaPrice = DEFAULT_PRICES.tokens.MYA;
@@ -74,10 +91,10 @@ export class PriceService {
 
       if (resp.ok) {
         const data = await resp.json();
-        const tonPrice = data['the-open-network']?.usd || DEFAULT_PRICES.tonUsd;
-        const tonChange = data['the-open-network']?.usd_24h_change || DEFAULT_PRICES.change24h;
-        const solPrice = data['solana']?.usd || DEFAULT_PRICES.solUsd;
-        const solChange = data['solana']?.usd_24h_change || DEFAULT_PRICES.change24hSol;
+        const tonPrice = data['the-open-network']?.usd || this.currentPrices.tonUsd || DEFAULT_PRICES.tonUsd;
+        const tonChange = data['the-open-network']?.usd_24h_change ?? this.currentPrices.change24h ?? DEFAULT_PRICES.change24h;
+        const solPrice = data['solana']?.usd || this.currentPrices.solUsd || DEFAULT_PRICES.solUsd;
+        const solChange = data['solana']?.usd_24h_change ?? this.currentPrices.change24hSol ?? DEFAULT_PRICES.change24hSol;
         const notPrice = data['notcoin']?.usd || DEFAULT_PRICES.tokens.NOT;
         const dogsPrice = data['dogs-2']?.usd || DEFAULT_PRICES.tokens.DOGS;
         const bonkPrice = data['bonk']?.usd || DEFAULT_PRICES.tokens.BONK;
@@ -105,20 +122,46 @@ export class PriceService {
         };
 
         this.listeners.forEach(fn => fn(this.currentPrices));
-      } else {
-        // API answered but not OK: keep last known prices, mark them stale so
-        // the UI never presents hardcoded defaults as live market data.
-        this.currentPrices = { ...this.currentPrices, source: 'stale' };
-        this.listeners.forEach(fn => fn(this.currentPrices));
+        return this.currentPrices;
       }
     } catch {
-      // Network failure: keep last known prices, mark stale.
-      this.currentPrices = { ...this.currentPrices, source: 'stale' };
-      this.listeners.forEach(fn => fn(this.currentPrices));
-    } finally {
-      this.isFetching = false;
+      // Proceed to fallback
     }
 
+    // 2. Fallback to Binance ticker if CoinGecko is rate-limited or unavailable
+    try {
+      const bResp = await fetch('https://api.binance.com/api/v3/ticker/24hr?symbols=[%22TONUSDT%22,%22SOLUSDT%22]');
+      if (bResp.ok) {
+        const bData = await bResp.json();
+        const tonItem = Array.isArray(bData) ? bData.find((x: any) => x.symbol === 'TONUSDT') : null;
+        const solItem = Array.isArray(bData) ? bData.find((x: any) => x.symbol === 'SOLUSDT') : null;
+        const tonPrice = tonItem ? parseFloat(tonItem.lastPrice) : this.currentPrices.tonUsd;
+        const tonChange = tonItem ? parseFloat(tonItem.priceChangePercent) : this.currentPrices.change24h;
+        const solPrice = solItem ? parseFloat(solItem.lastPrice) : this.currentPrices.solUsd;
+        const solChange = solItem ? parseFloat(solItem.priceChangePercent) : this.currentPrices.change24hSol;
+
+        this.currentPrices = {
+          tonUsd: tonPrice,
+          change24h: tonChange,
+          solUsd: solPrice,
+          change24hSol: solChange,
+          tokens: {
+            ...this.currentPrices.tokens,
+            TON: tonPrice,
+            SOL: solPrice,
+          },
+          lastUpdated: Date.now(),
+          source: 'live',
+        };
+        this.listeners.forEach(fn => fn(this.currentPrices));
+        return this.currentPrices;
+      }
+    } catch {}
+
+    // 3. If all requests failed, mark stale
+    this.currentPrices = { ...this.currentPrices, source: 'stale' };
+    this.listeners.forEach(fn => fn(this.currentPrices));
+    this.isFetching = false;
     return this.currentPrices;
   }
 

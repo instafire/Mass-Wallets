@@ -8,14 +8,11 @@ import {
   Award, 
   BookOpen, 
   Activity, 
-  Zap, 
   Download, 
-  Globe, 
   Crown,
   Image as ImageIcon,
   Layers,
-  Coins,
-  Droplets
+  Coins
 } from 'lucide-react';
 import type { ManagedWallet, Network } from '../types';
 
@@ -23,8 +20,8 @@ interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
   wallets: ManagedWallet[];
-  network: Network;
-  setNetwork: (net: Network) => void;
+  network?: Network;
+  setNetwork?: (net: Network) => void;
   onOpenCreateVault: () => void;
   onOpenMassGenerator: () => void;
   onOpenMassSend: () => void;
@@ -34,7 +31,7 @@ interface CommandPaletteProps {
   onOpenAddressBook: () => void;
   onOpenActivityLog: () => void;
   onOpenHealthAudit: () => void;
-  onOpenTongramFaucet: () => void;
+  onOpenTongramFaucet?: () => void;
   onOpenExportVault: () => void;
   onOpenNFTGallery?: () => void;
   onOpenMassNFTDisperse?: () => void;
@@ -49,8 +46,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   isOpen,
   onClose,
   wallets,
-  network,
-  setNetwork,
+  network: _network,
+  setNetwork: _setNetwork,
   onOpenCreateVault,
   onOpenMassGenerator,
   onOpenMassSend,
@@ -60,14 +57,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenAddressBook,
   onOpenActivityLog,
   onOpenHealthAudit,
-  onOpenTongramFaucet,
+  onOpenTongramFaucet: _onOpenTongramFaucet,
   onOpenExportVault,
   onOpenNFTGallery,
   onOpenMassNFTDisperse,
   onOpenAddNFT,
   onOpenSolanaAddressSheet,
   onOpenSolanaTokenPortfolio,
-  onOpenSolanaFaucet,
+  onOpenSolanaFaucet: _onOpenSolanaFaucet,
   onSelectWallet,
 }) => {
   const [query, setQuery] = useState('');
@@ -96,13 +93,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       category: 'Solana',
       icon: <Layers className="w-4 h-4 text-[#14F195]" />,
       action: () => { onClose(); onOpenSolanaAddressSheet?.(); },
-    },
-    {
-      id: 'act-solana-faucet',
-      title: 'Solana Devnet Faucet (Airdrop Test SOL)',
-      category: 'Solana',
-      icon: <Droplets className="w-4 h-4 text-purple-400" />,
-      action: () => { onClose(); onOpenSolanaFaucet?.(); },
     },
     {
       id: 'act-generator',
@@ -168,13 +158,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       action: () => { onClose(); onOpenHealthAudit(); },
     },
     {
-      id: 'act-faucet',
-      title: 'TONGRAM Faucet & Test Gas',
-      category: 'Tools',
-      icon: <Zap className="w-4 h-4 text-amber-400" />,
-      action: () => { onClose(); onOpenTongramFaucet(); },
-    },
-    {
       id: 'act-export',
       title: 'Export Full Master Backup (JSON)',
       category: 'Backup',
@@ -201,13 +184,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       category: 'NFTs',
       icon: <Sparkles className="w-4 h-4 text-purple-300" />,
       action: () => { onClose(); if (onOpenAddNFT) onOpenAddNFT(); },
-    },
-    {
-      id: 'act-net-toggle',
-      title: `Switch Network to ${network === 'mainnet' ? 'Testnet' : 'Mainnet'}`,
-      category: 'Network',
-      icon: <Globe className="w-4 h-4 text-emerald-400" />,
-      action: () => { setNetwork(network === 'mainnet' ? 'testnet' : 'mainnet'); onClose(); },
     },
   ];
 

@@ -78,7 +78,7 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
                 <span className="badge badge-gold">Central Hub</span>
               </div>
               <p className="text-xs text-gray-400">
-                Designate a primary funding vault to distribute TON coins and tokens to all {allWallets.length} studio wallets.
+                Designate a primary funding vault to distribute TON & Solana assets to all {allWallets.length} studio wallets.
               </p>
             </div>
           </div>

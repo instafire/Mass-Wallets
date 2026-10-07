@@ -13,7 +13,6 @@ import {
   Award, 
   QrCode, 
   FileSpreadsheet, 
-  Zap, 
   Trash2,
   Crown,
   Search,
@@ -25,20 +24,19 @@ import {
   TrendingUp,
   TrendingDown,
   Image as ImageIcon,
-  Coins,
-  Droplets
+  Coins
 } from 'lucide-react';
 import { PriceService, type PriceData } from '../services/priceService';
 
 interface HeaderProps {
-  network: Network;
-  setNetwork: (net: Network) => void;
+  network?: Network;
+  setNetwork?: (net: Network) => void;
   vaultConfig: VaultConfig;
   onOpenCreateVault: () => void;
   onOpenMassGenerator: () => void;
   onOpenImport: () => void;
   onOpenMassSend: () => void;
-  onOpenTongramFaucet: () => void;
+  onOpenTongramFaucet?: () => void;
   onExportVault: () => void;
   onOpenVaultSecurity: () => void;
   onOpenVaultRecovery: () => void;
@@ -63,14 +61,14 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  network,
-  setNetwork,
+  network: _network,
+  setNetwork: _setNetwork,
   vaultConfig,
   onOpenCreateVault,
   onOpenMassGenerator,
   onOpenImport,
   onOpenMassSend,
-  onOpenTongramFaucet,
+  onOpenTongramFaucet: _onOpenTongramFaucet,
   onExportVault,
   onOpenVaultSecurity,
   onOpenVaultRecovery,
@@ -89,7 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAddNFT,
   onOpenSolanaAddressSheet,
   onOpenSolanaTokenPortfolio,
-  onOpenSolanaFaucet,
+  onOpenSolanaFaucet: _onOpenSolanaFaucet,
   isRefreshing,
   walletCount,
 }) => {
@@ -138,40 +136,37 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Network Switcher & Price Pill */}
-          <div className="hidden lg:flex items-center gap-2 pl-2 border-l border-white/10">
-            <div className="flex items-center bg-[#0d1424] p-0.5 rounded-xl border border-white/10">
-              <button
-                onClick={() => setNetwork('mainnet')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-                  network === 'mainnet'
-                    ? 'bg-[#0098EA] text-white shadow-md shadow-[#0098EA]/25'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${network === 'mainnet' ? 'bg-emerald-300 animate-pulse' : 'bg-gray-500'}`} />
-                Mainnet
-              </button>
-              <button
-                onClick={() => setNetwork('testnet')}
-                className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-                  network === 'testnet'
-                    ? 'bg-amber-500 text-white shadow-md shadow-amber-500/25'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${network === 'testnet' ? 'bg-amber-300 animate-pulse' : 'bg-gray-500'}`} />
-                Testnet
-              </button>
+          {/* Network Indicator & Live Price Pills */}
+          <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-white/10">
+            {/* Active Mainnet Badge */}
+            <div className="flex items-center gap-1.5 bg-[#0d1424] px-2.5 py-1 rounded-xl border border-emerald-500/30 text-xs font-bold text-emerald-400 select-none shadow-sm" title="Connected to Mainnet">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Mainnet</span>
             </div>
 
             {/* Live TON Price Pill */}
-            <div className="hidden xl:flex items-center gap-1.5 bg-[#0d1424] px-2.5 py-1 rounded-xl border border-white/10 text-xs font-mono select-none" title={priceData.source === 'live' ? `Updated ${new Date(priceData.lastUpdated).toLocaleTimeString()}` : 'Price feed unreachable — showing last known values'}>
-              <span className="text-gray-400 font-sans text-[11px]">TON</span>
+            <div 
+              className="flex items-center gap-1.5 bg-[#0d1424] px-2.5 py-1 rounded-xl border border-white/10 text-xs font-mono select-none" 
+              title={priceData.source === 'live' ? `TON • Updated ${new Date(priceData.lastUpdated).toLocaleTimeString()}` : 'Price feed unreachable — showing last known values'}
+            >
+              <span className="text-[#0098EA] font-sans font-bold text-[11px]">TON</span>
               <span className="font-bold text-white">${(priceData.tonUsd || 0).toFixed(2)}</span>
               <span className={`text-[10px] font-bold flex items-center ${(priceData.change24h || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                 {(priceData.change24h || 0) >= 0 ? <TrendingUp className="w-2.5 h-2.5 mr-0.5" /> : <TrendingDown className="w-2.5 h-2.5 mr-0.5" />}
                 {(priceData.change24h || 0) >= 0 ? '+' : ''}{(priceData.change24h || 0).toFixed(1)}%
+              </span>
+            </div>
+
+            {/* Live SOL Price Pill */}
+            <div 
+              className="flex items-center gap-1.5 bg-[#0d1424] px-2.5 py-1 rounded-xl border border-white/10 text-xs font-mono select-none" 
+              title={priceData.source === 'live' ? `SOL • Updated ${new Date(priceData.lastUpdated).toLocaleTimeString()}` : 'Price feed unreachable — showing last known values'}
+            >
+              <span className="text-[#14F195] font-sans font-bold text-[11px]">SOL</span>
+              <span className="font-bold text-white">${(priceData.solUsd || 0).toFixed(2)}</span>
+              <span className={`text-[10px] font-bold flex items-center ${(priceData.change24hSol || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {(priceData.change24hSol || 0) >= 0 ? <TrendingUp className="w-2.5 h-2.5 mr-0.5" /> : <TrendingDown className="w-2.5 h-2.5 mr-0.5" />}
+                {(priceData.change24hSol || 0) >= 0 ? '+' : ''}{(priceData.change24hSol || 0).toFixed(1)}%
               </span>
               {priceData.source !== 'live' && (
                 <span className="text-[9px] font-sans font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 rounded px-1 py-px">STALE</span>
@@ -291,7 +286,7 @@ export const Header: React.FC<HeaderProps> = ({
             {isToolsDropdownOpen && (
               <div className="absolute right-0 mt-2 w-64 glass-panel bg-[#090e1c] border border-white/15 rounded-2xl shadow-2xl p-2 z-50 animate-scaleUp space-y-1 text-xs">
                 
-                {(onOpenSolanaAddressSheet || onOpenSolanaTokenPortfolio || onOpenSolanaFaucet) && (
+                {(onOpenSolanaAddressSheet || onOpenSolanaTokenPortfolio) && (
                   <div className="pb-1 mb-1 border-b border-white/10 space-y-0.5">
                     <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#14F195]">
                       Solana Suite
@@ -312,15 +307,6 @@ export const Header: React.FC<HeaderProps> = ({
                       >
                         <Layers className="w-4 h-4 text-[#14F195]" />
                         <span>Solana Address Sheet</span>
-                      </button>
-                    )}
-                    {onOpenSolanaFaucet && (
-                      <button
-                        onClick={() => { setIsToolsDropdownOpen(false); onOpenSolanaFaucet(); }}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-left hover:bg-white/5 text-purple-300 font-semibold"
-                      >
-                        <Droplets className="w-4 h-4 text-purple-400" />
-                        <span>Solana Devnet Faucet</span>
                       </button>
                     )}
                   </div>
@@ -451,15 +437,6 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Download className="w-4 h-4 text-[#0098EA]" />
                   <span>Export Vault JSON</span>
-                </button>
-
-                <button
-                  onClick={() => { setIsToolsDropdownOpen(false); onOpenTongramFaucet(); }}
-                  disabled={walletCount === 0}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-white/5 text-amber-400 disabled:opacity-40"
-                >
-                  <Zap className="w-4 h-4 text-amber-400" />
-                  <span>TONGRAM Token Faucet</span>
                 </button>
 
                 {walletCount > 0 && (
