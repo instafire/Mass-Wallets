@@ -38,7 +38,8 @@ import {
   Droplets,
   FileCode,
   FileText,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Zap
 } from "lucide-react";
 
 interface WalletListProps {
@@ -63,6 +64,7 @@ interface WalletListProps {
   onOpenSolanaFaucet?: () => void;
   onViewHoldings?: (wallet: ManagedWallet) => void;
   onSetAsTreasury?: (walletId: string) => void;
+  onOpenSolanaCostEstimator?: (tokenSymbol?: string) => void;
 }
 
 type ViewMode = "matrix" | "batches" | "grid";
@@ -91,6 +93,7 @@ export const WalletList: React.FC<WalletListProps> = ({
   onOpenSolanaAddressSheet,
   onOpenSolanaTokenPortfolio,
   onOpenSolanaFaucet,
+  onOpenSolanaCostEstimator,
 }) => {
   // View & Filter States
   const [viewMode, setViewMode] = useState<ViewMode>("matrix");
@@ -782,6 +785,18 @@ export const WalletList: React.FC<WalletListProps> = ({
               >
                 <Layers className="w-3 h-3 text-[#14F195]" />
                 <span>Address Sheet</span>
+              </button>
+            )}
+
+            {onOpenSolanaCostEstimator && (
+              <button
+                type="button"
+                onClick={() => onOpenSolanaCostEstimator()}
+                className="btn btn-secondary btn-sm text-[11px] py-1 px-2.5 text-[#14F195] border-[#14F195]/30 hover:bg-[#14F195]/10 flex items-center gap-1 font-bold"
+                title="Calculate SOL cost to distribute any token across all wallets"
+              >
+                <Zap className="w-3 h-3 text-[#14F195]" />
+                <span>Fee Calc ⚡</span>
               </button>
             )}
             <button

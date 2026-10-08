@@ -41,6 +41,7 @@ import { MassNFTDisperseModal } from './components/MassNFTDisperseModal';
 import { AddNFTModal } from './components/AddNFTModal';
 import { SwitchTreasuryModal } from './components/SwitchTreasuryModal';
 import { WalletHoldingsModal } from './components/WalletHoldingsModal';
+import { SolanaDistributionCostModal } from './components/SolanaDistributionCostModal';
 import { Layers, RefreshCw } from 'lucide-react';
 
 export function App() {
@@ -85,8 +86,15 @@ export function App() {
   const [solanaAddressSheetWallets, setSolanaAddressSheetWallets] = useState<ManagedWallet[]>([]);
   const [isSolanaTokenPortfolioOpen, setIsSolanaTokenPortfolioOpen] = useState<boolean>(false);
   const [isSolanaFaucetOpen, setIsSolanaFaucetOpen] = useState<boolean>(false);
+  const [isSolanaCostEstimatorOpen, setIsSolanaCostEstimatorOpen] = useState<boolean>(false);
+  const [solanaCostEstimatorToken, setSolanaCostEstimatorToken] = useState<string>('SOL');
   const [isSwitchTreasuryOpen, setIsSwitchTreasuryOpen] = useState<boolean>(false);
   const [activeHoldingsWallet, setActiveHoldingsWallet] = useState<ManagedWallet | null>(null);
+
+  const handleOpenSolanaCostEstimator = (tokenSymbol?: string) => {
+    setSolanaCostEstimatorToken(tokenSymbol || 'SOL');
+    setIsSolanaCostEstimatorOpen(true);
+  };
 
   // Selected Target Wallets for specific modals
   const [activeSendWallet, setActiveSendWallet] = useState<ManagedWallet | null>(null);
@@ -500,6 +508,7 @@ export function App() {
           network={network} 
           onOpenGasBalancer={() => setIsGasBalancerOpen(true)}
           onOpenNFTGallery={() => handleOpenNFTGallery()}
+          onOpenSolanaCostEstimator={() => handleOpenSolanaCostEstimator('SOL')}
         />
 
         {/* Master Treasury Main Wallet Hub Banner */}
@@ -522,6 +531,7 @@ export function App() {
           onCreateMainWallet={() => setIsCreateVaultOpen(true)}
           onOpenSwitchTreasury={() => setIsSwitchTreasuryOpen(true)}
           onViewHoldings={(w) => setActiveHoldingsWallet(w)}
+          onOpenSolanaCostEstimator={(token) => handleOpenSolanaCostEstimator(token)}
         />
 
         {/* Managed Wallet List & High-Speed Explorer */}
@@ -547,6 +557,7 @@ export function App() {
           onOpenSolanaAddressSheet={handleOpenSolanaAddressSheet}
           onOpenSolanaTokenPortfolio={handleOpenSolanaTokenPortfolio}
           onOpenSolanaFaucet={handleOpenSolanaFaucet}
+          onOpenSolanaCostEstimator={(token) => handleOpenSolanaCostEstimator(token)}
         />
 
       </main>
@@ -704,6 +715,7 @@ export function App() {
         mainWallet={mainWallet}
         recipientWallets={wallets}
         network={network}
+        initialToken={solanaCostEstimatorToken}
         onDistributionComplete={() => {
           showToast('Treasury mass distribution completed!');
           handleRefreshBalances();
@@ -776,6 +788,7 @@ export function App() {
         onOpenSolanaAddressSheet={() => handleOpenSolanaAddressSheet()}
         onOpenSolanaTokenPortfolio={handleOpenSolanaTokenPortfolio}
         onOpenSolanaFaucet={handleOpenSolanaFaucet}
+        onOpenSolanaCostEstimator={() => handleOpenSolanaCostEstimator('SOL')}
         onSelectWallet={(w) => setActiveSendWallet(w)}
       />
 
@@ -872,10 +885,31 @@ export function App() {
         wallets={wallets}
         network={network}
         onOpenSendToken={handleSolanaTokenPortfolioSend}
+        onOpenDistributionCostEstimator={(token) => handleOpenSolanaCostEstimator(token)}
         onFilterByToken={(_tokenSymbol) => {
           showToast(`Filtered studio wallets for ${_tokenSymbol}`);
         }}
         onRefreshBalances={() => handleRefreshBalances()}
+      />
+
+      {/* Solana Token Distribution Cost Estimator Modal */}
+      <SolanaDistributionCostModal
+        isOpen={isSolanaCostEstimatorOpen}
+        onClose={() => setIsSolanaCostEstimatorOpen(false)}
+        wallets={wallets}
+        mainWallet={mainWallet}
+        network={network}
+        initialToken={solanaCostEstimatorToken}
+        onLaunchDistribute={(tokenSymbol, targets) => {
+          setIsSolanaCostEstimatorOpen(false);
+          setSolanaCostEstimatorToken(tokenSymbol);
+          if (mainWallet && isSolanaWallet(mainWallet)) {
+            setIsMainDistributeOpen(true);
+          } else {
+            setPresetSendToken(tokenSymbol);
+            handleOpenMassSendWithRecipients(targets);
+          }
+        }}
       />
 
       {/* Solana Devnet Airdrop Faucet Modal */}

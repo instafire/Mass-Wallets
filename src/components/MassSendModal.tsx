@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { ManagedWallet, Network, MassSendItem } from '../types';
 import { isSolanaWallet } from '../types';
 import { TonService } from '../services/tonService';
-import { SolanaService } from '../services/solanaService';
+import { SolanaService, SOLANA_BASE_TX_FEE_SOL, SOLANA_ATA_RENT_SOL } from '../services/solanaService';
 import confetti from 'canvas-confetti';
 import { X, Send, RefreshCw, Users, ShieldAlert } from 'lucide-react';
 
@@ -113,9 +113,15 @@ export const MassSendModal: React.FC<MassSendModalProps> = ({
   };
 
   // Realistic per-tx fees: TON ~0.01, jetton ~0.05 (attached + forward gas).
-  const minFeePerTx = isSolanaSender ? 0.000005 : (selectedToken === 'TON' ? 0.01 : 0.05);
+  // Solana: signature fee (0.000005 SOL) + ATA rent deposit (0.00203928 SOL) if distributing an SPL token.
+  const isSolanaSpl = isSolanaSender && selectedToken !== 'SOL';
+  const minFeePerTx = isSolanaSender ? SOLANA_BASE_TX_FEE_SOL : (selectedToken === 'TON' ? 0.01 : 0.05);
   const totalAmountNeeded = recipients.reduce((sum, r) => sum + parseFloat(r.amount || '0'), 0);
-  const estimatedGas = recipients.length * minFeePerTx;
+  const solanaBaseFee = recipients.length * SOLANA_BASE_TX_FEE_SOL;
+  const solanaAtaRent = isSolanaSpl ? recipients.length * SOLANA_ATA_RENT_SOL : 0;
+  const estimatedGas = isSolanaSender 
+    ? (solanaBaseFee + solanaAtaRent) 
+    : (recipients.length * minFeePerTx);
   const senderBalance = activeSender ? parseFloat(activeSender.balance || '0') : 0;
 
   const activeJetton = activeSender?.jettons?.find(j => j.symbol === selectedToken);

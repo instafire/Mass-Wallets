@@ -8,9 +8,16 @@ interface StatsBannerProps {
   network: Network;
   onOpenGasBalancer?: () => void;
   onOpenNFTGallery?: () => void;
+  onOpenSolanaCostEstimator?: () => void;
 }
 
-export const StatsBanner: React.FC<StatsBannerProps> = ({ wallets, network: _network, onOpenGasBalancer, onOpenNFTGallery: _onOpenNFTGallery }) => {
+export const StatsBanner: React.FC<StatsBannerProps> = ({ 
+  wallets, 
+  network: _network, 
+  onOpenGasBalancer, 
+  onOpenNFTGallery: _onOpenNFTGallery,
+  onOpenSolanaCostEstimator,
+}) => {
   const [priceData, setPriceData] = useState<PriceData>(PriceService.getPrices());
 
   useEffect(() => {
@@ -164,6 +171,17 @@ export const StatsBanner: React.FC<StatsBannerProps> = ({ wallets, network: _net
               {(priceData.change24hSol || 0) >= 0 ? <TrendingUp className="w-2.5 h-2.5 mr-0.5" /> : <TrendingDown className="w-2.5 h-2.5 mr-0.5" />}
               {(priceData.change24hSol || 0) >= 0 ? '+' : ''}{(priceData.change24hSol || 0).toFixed(1)}%
             </span>
+            {onOpenSolanaCostEstimator && solWallets.length > 0 && (
+              <button
+                type="button"
+                onClick={onOpenSolanaCostEstimator}
+                className="ml-1 px-1.5 py-0.5 rounded-md bg-[#14F195]/15 text-[#14F195] hover:bg-[#14F195]/25 border border-[#14F195]/30 text-[10px] font-bold flex items-center gap-1 transition-all shadow-sm"
+                title="Calculate SOL cost to distribute any token across all wallets"
+              >
+                <Zap className="w-2.5 h-2.5 text-[#14F195]" />
+                <span>SOL Calc</span>
+              </button>
+            )}
           </div>
 
           {/* Squads v4 Badge if present */}

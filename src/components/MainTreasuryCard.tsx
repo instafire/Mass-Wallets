@@ -17,7 +17,7 @@ import {
   Coins
 } from 'lucide-react';
 import { PriceService, type PriceData } from '../services/priceService';
-import { SUPPORTED_SOLANA_TOKENS } from '../services/solanaService';
+import { SUPPORTED_SOLANA_TOKENS, SOLANA_BASE_TX_FEE_SOL, SOLANA_ATA_RENT_SOL } from '../services/solanaService';
 
 interface MainTreasuryCardProps {
   mainWallet: ManagedWallet | null;
@@ -35,6 +35,7 @@ interface MainTreasuryCardProps {
   onCreateMainWallet: () => void;
   onOpenSwitchTreasury?: () => void;
   onViewHoldings?: (wallet: ManagedWallet) => void;
+  onOpenSolanaCostEstimator?: (tokenSymbol?: string) => void;
 }
 
 export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
@@ -52,6 +53,7 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
   onCreateMainWallet,
   onOpenSwitchTreasury,
   onViewHoldings,
+  onOpenSolanaCostEstimator,
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
   const [priceData, setPriceData] = useState<PriceData>(PriceService.getPrices());
@@ -206,15 +208,41 @@ export const MainTreasuryCard: React.FC<MainTreasuryCardProps> = ({
               )}
             </div>
 
-            {/* Quick Gas Requirement Badge */}
+            {/* Quick Gas / Solana Distribution Cost Requirement Badge */}
             {recipientCount > 0 && (
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <Fuel className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                <Fuel className={`w-3.5 h-3.5 ${isSolana ? 'text-[#14F195]' : 'text-amber-400'} shrink-0`} />
                 <span>
-                  Estimated gas for all {recipientCount} wallets: <strong className="text-amber-300 font-mono">
-                    ~{isSolana ? estimatedGas.toFixed(6) + ' SOL' : estimatedGas.toFixed(3) + ' TON'}
-                  </strong> (Eco Mode)
+                  {isSolana ? (
+                    <>
+                      Estimated SOL to distribute to all {recipientCount} wallets: <strong className="text-[#14F195] font-mono">
+                        ~{(recipientCount * SOLANA_BASE_TX_FEE_SOL).toFixed(6)} SOL
+                      </strong>
+                      {activeTokens.length > 0 && (
+                        <span className="text-gray-400 font-sans ml-1 text-[11px]">
+                          (or ~{(recipientCount * (SOLANA_BASE_TX_FEE_SOL + SOLANA_ATA_RENT_SOL)).toFixed(4)} SOL max for SPL tokens)
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      Estimated gas for all {recipientCount} wallets: <strong className="text-amber-300 font-mono">
+                        ~{estimatedGas.toFixed(3)} TON
+                      </strong> (Eco Mode)
+                    </>
+                  )}
                 </span>
+                {isSolana && onOpenSolanaCostEstimator && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenSolanaCostEstimator()}
+                    className="text-[11px] text-[#14F195] hover:text-[#14F195]/80 bg-[#14F195]/10 border border-[#14F195]/30 px-2 py-0.5 rounded-lg font-bold ml-1 flex items-center gap-1 transition-all shadow-sm"
+                    title="Calculate exact SOL cost to distribute any token across all wallets"
+                  >
+                    <Zap className="w-3 h-3 text-[#14F195]" />
+                    <span>SOL Cost Estimator ⚡</span>
+                  </button>
+                )}
                 {!isSolana && onOpenGasBalancer && (
                   <button
                     onClick={onOpenGasBalancer}

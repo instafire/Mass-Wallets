@@ -12,7 +12,8 @@ import {
   Crown,
   Image as ImageIcon,
   Layers,
-  Coins
+  Coins,
+  Zap
 } from 'lucide-react';
 import type { ManagedWallet, Network } from '../types';
 
@@ -39,6 +40,7 @@ interface CommandPaletteProps {
   onOpenSolanaAddressSheet?: () => void;
   onOpenSolanaTokenPortfolio?: () => void;
   onOpenSolanaFaucet?: () => void;
+  onOpenSolanaCostEstimator?: () => void;
   onSelectWallet: (wallet: ManagedWallet) => void;
 }
 
@@ -65,6 +67,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenSolanaAddressSheet,
   onOpenSolanaTokenPortfolio,
   onOpenSolanaFaucet: _onOpenSolanaFaucet,
+  onOpenSolanaCostEstimator,
   onSelectWallet,
 }) => {
   const [query, setQuery] = useState('');
@@ -80,6 +83,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   }, [isOpen]);
 
   const actions = [
+    {
+      id: 'act-solana-cost-estimator',
+      title: 'Solana Token Distribution Cost Estimator (SOL)',
+      category: 'Solana',
+      icon: <Zap className="w-4 h-4 text-[#14F195]" />,
+      action: () => { onClose(); onOpenSolanaCostEstimator?.(); },
+    },
     {
       id: 'act-solana-portfolio',
       title: 'Solana SPL Token Portfolio & Balances',

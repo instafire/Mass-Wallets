@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import type { ManagedWallet, Network } from '../types';
 import { isSolanaWallet } from '../types';
 import { TonService, SUPPORTED_JETTONS } from '../services/tonService';
-import { SolanaService } from '../services/solanaService';
+import { SolanaService, SOLANA_BASE_TX_FEE_SOL, SOLANA_ATA_RENT_SOL } from '../services/solanaService';
 import confetti from 'canvas-confetti';
 import { 
   X, 
@@ -15,7 +15,8 @@ import {
   Check, 
   Fuel, 
   ArrowRight,
-  Zap
+  Zap,
+  Info
 } from 'lucide-react';
 
 interface MainWalletDistributeModalProps {
@@ -24,6 +25,7 @@ interface MainWalletDistributeModalProps {
   mainWallet: ManagedWallet | null;
   recipientWallets: ManagedWallet[];
   network: Network;
+  initialToken?: string;
   onDistributionComplete: () => void;
 }
 
@@ -33,6 +35,7 @@ export const MainWalletDistributeModal: React.FC<MainWalletDistributeModalProps>
   mainWallet,
   recipientWallets,
   network,
+  initialToken,
   onDistributionComplete,
 }) => {
   const isSolana = isSolanaWallet(mainWallet);
@@ -59,6 +62,12 @@ export const MainWalletDistributeModal: React.FC<MainWalletDistributeModalProps>
       j.symbol.toUpperCase() !== nativeSymbol && parseFloat(j.balance || '0') > 0
     );
   }, [mainWallet, isSolana]);
+
+  useEffect(() => {
+    if (initialToken) {
+      setSelectedToken(initialToken);
+    }
+  }, [initialToken, isOpen]);
 
   useEffect(() => {
     const nativeSym = isSolana ? 'SOL' : 'TON';
@@ -117,8 +126,25 @@ export const MainWalletDistributeModal: React.FC<MainWalletDistributeModalProps>
     }
   }
 
-  const totalGasFeeRequired = totalRecipientsCount * minFeePerTx;
   const isNativeToken = isSolana ? selectedToken === 'SOL' : selectedToken === 'TON';
+
+  // Solana fee mechanics:
+  // 1. Signature base fee: 5,000 lamports = 0.000005 SOL per transfer
+  // 2. Associated Token Account (ATA) rent-exempt deposit: 2,039,280 lamports = 0.00203928 SOL
+  //    Required for any recipient who does not already hold this SPL token on-chain.
+  const solanaAtaNeededCount = (!isSolana || isNativeToken) 
+    ? 0 
+    : validRecipients.filter(w => {
+        const jettons = w.jettons || [];
+        const hasToken = jettons.some(j => j.symbol.toUpperCase() === selectedToken.toUpperCase());
+        return !hasToken;
+      }).length;
+
+  const solanaBaseTxCost = totalRecipientsCount * SOLANA_BASE_TX_FEE_SOL;
+  const solanaAtaRentCost = solanaAtaNeededCount * SOLANA_ATA_RENT_SOL;
+  const solanaTotalGasFee = solanaBaseTxCost + solanaAtaRentCost;
+
+  const totalGasFeeRequired = isSolana ? solanaTotalGasFee : (totalRecipientsCount * minFeePerTx);
 
   // Total Native Vault MUST hold to execute:
   const totalNativeRequiredInVault = isNativeToken 
@@ -364,14 +390,47 @@ export const MainWalletDistributeModal: React.FC<MainWalletDistributeModalProps>
 
           {/* GAS OPTIMIZATION ENGINE & GAS TIER SELECTOR */}
           {isSolana ? (
-            <div className="bg-[#080d1a] p-4 rounded-2xl border border-purple-500/30 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-purple-400" />
-                <span className="text-xs font-bold text-white uppercase tracking-wider">Solana Network Transaction Fee:</span>
+            <div className="bg-[#080d1a] p-4 rounded-2xl border border-purple-500/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-purple-400" />
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">Solana Network Fees & Rent Breakdown:</span>
+                </div>
+                <span className="text-xs text-[#14F195] font-bold font-mono">
+                  ~{solanaTotalGasFee.toFixed(6)} SOL total
+                </span>
               </div>
-              <span className="text-[11px] text-[#14F195] font-bold font-mono">
-                ~0.000005 SOL / tx (~$0.0008)
-              </span>
+
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="bg-[#121b30] p-2.5 rounded-xl border border-white/5">
+                  <span className="text-gray-400 block mb-0.5">Base Signature Fees:</span>
+                  <span className="text-white font-mono font-bold block">
+                    {solanaBaseTxCost.toFixed(6)} SOL
+                  </span>
+                  <span className="text-[10px] text-gray-500 block">
+                    {totalRecipientsCount} txs × 0.000005 SOL
+                  </span>
+                </div>
+
+                <div className="bg-[#121b30] p-2.5 rounded-xl border border-white/5">
+                  <span className="text-gray-400 block mb-0.5">ATA Rent-Exempt Deposits:</span>
+                  <span className="text-[#14F195] font-mono font-bold block">
+                    {solanaAtaRentCost > 0 ? `${solanaAtaRentCost.toFixed(6)} SOL` : '0 SOL (Native SOL)'}
+                  </span>
+                  <span className="text-[10px] text-gray-500 block">
+                    {solanaAtaNeededCount > 0 ? `${solanaAtaNeededCount} uninitialized ATAs × 0.00204 SOL` : 'All recipients ATA ready'}
+                  </span>
+                </div>
+              </div>
+
+              {!isNativeToken && (
+                <div className="flex items-start gap-1.5 text-[10px] text-gray-400 bg-purple-500/10 p-2 rounded-lg border border-purple-500/20">
+                  <Info className="w-3 h-3 text-purple-300 shrink-0 mt-0.5" />
+                  <span>
+                    Solana requires a 0.00203928 SOL rent-exempt deposit for any wallet receiving {selectedToken} for the first time to allocate a 165-byte Associated Token Account (ATA).
+                  </span>
+                </div>
+              )}
             </div>
           ) : (
             <div className="bg-[#080d1a] p-4 rounded-2xl border border-white/10 space-y-3">
@@ -502,7 +561,9 @@ export const MainWalletDistributeModal: React.FC<MainWalletDistributeModalProps>
                   ~{totalGasFeeRequired.toFixed(isSolana ? 6 : 3)} {isSolana ? 'SOL' : 'TON'}
                 </span>
                 <span className="text-[10px] text-gray-500 block">
-                  ({minFeePerTx} {isSolana ? 'SOL' : 'TON'} × {totalRecipientsCount})
+                  {isSolana 
+                    ? `(${totalRecipientsCount} txs${solanaAtaNeededCount > 0 ? ` + ${solanaAtaNeededCount} ATAs` : ''})` 
+                    : `(${minFeePerTx} TON × ${totalRecipientsCount})`}
                 </span>
               </div>
 

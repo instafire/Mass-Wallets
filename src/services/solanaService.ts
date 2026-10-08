@@ -144,8 +144,84 @@ export const SUPPORTED_SOLANA_TOKENS: JettonTokenInfo[] = [
   },
 ];
 
+export const SOLANA_BASE_TX_FEE_SOL = 0.000005; // 5,000 lamports standard signature fee
+export const SOLANA_ATA_RENT_SOL = 0.00203928; // 2,039,280 lamports rent-exemption for 165-byte SPL token account
+
+export interface SolanaDistributionCostEstimate {
+  recipientCount: number;
+  tokenSymbol: string;
+  isNativeSol: boolean;
+  txFeePerWallet: number;
+  totalTxFeesSol: number;
+  ataRentPerWallet: number;
+  existingAtasCount: number;
+  newAtasNeededCount: number;
+  totalAtaRentCostSol: number;
+  totalSolCost: number;
+  totalUsdCost: number;
+  solPriceUsd: number;
+  treasurySolBalance: number;
+  hasEnoughSolForGas: boolean;
+  solDeficit: number;
+}
+
 export class SolanaService {
   private static connectionCache: Map<Network, Connection> = new Map();
+
+  /**
+   * Calculates the exact SOL cost to distribute any token on Solana to target wallets.
+   * Accounts for base signature fee (5,000 lamports / tx) and Associated Token Account
+   * (ATA) rent-exempt initialization (2,039,280 lamports / new account).
+   */
+  public static calculateDistributionCost(
+    targetWallets: ManagedWallet[],
+    tokenSymbol: string = 'SOL',
+    treasurySolBalance: number = 0,
+    solPriceUsd: number = 154.20
+  ): SolanaDistributionCostEstimate {
+    const isNativeSol = tokenSymbol.toUpperCase() === 'SOL';
+    const recipientCount = targetWallets.length;
+    const txFeePerWallet = SOLANA_BASE_TX_FEE_SOL;
+    const totalTxFeesSol = recipientCount * txFeePerWallet;
+
+    let existingAtasCount = recipientCount;
+    let newAtasNeededCount = 0;
+    let totalAtaRentCostSol = 0;
+    const ataRentPerWallet = isNativeSol ? 0 : SOLANA_ATA_RENT_SOL;
+
+    if (!isNativeSol) {
+      existingAtasCount = targetWallets.filter(w => {
+        return w.jettons?.some(j => 
+          j.symbol.toUpperCase() === tokenSymbol.toUpperCase() && parseFloat(j.balance || '0') > 0
+        );
+      }).length;
+      newAtasNeededCount = Math.max(0, recipientCount - existingAtasCount);
+      totalAtaRentCostSol = newAtasNeededCount * SOLANA_ATA_RENT_SOL;
+    }
+
+    const totalSolCost = totalTxFeesSol + totalAtaRentCostSol;
+    const totalUsdCost = totalSolCost * (solPriceUsd || 154.20);
+    const hasEnoughSolForGas = treasurySolBalance >= totalSolCost;
+    const solDeficit = Math.max(0, totalSolCost - treasurySolBalance);
+
+    return {
+      recipientCount,
+      tokenSymbol,
+      isNativeSol,
+      txFeePerWallet,
+      totalTxFeesSol,
+      ataRentPerWallet,
+      existingAtasCount,
+      newAtasNeededCount,
+      totalAtaRentCostSol,
+      totalSolCost,
+      totalUsdCost,
+      solPriceUsd,
+      treasurySolBalance,
+      hasEnoughSolForGas,
+      solDeficit,
+    };
+  }
 
   /**
    * Get cached or create Connection for Solana network

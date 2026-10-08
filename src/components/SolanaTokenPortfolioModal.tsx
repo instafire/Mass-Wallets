@@ -15,7 +15,8 @@ import {
   RefreshCw,
   Wallet,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Zap
 } from 'lucide-react';
 
 interface SolanaTokenPortfolioModalProps {
@@ -26,6 +27,7 @@ interface SolanaTokenPortfolioModalProps {
   onOpenSendToken?: (tokenSymbol: string, preselectedWallet?: ManagedWallet) => void;
   onFilterByToken?: (tokenSymbol: string) => void;
   onRefreshBalances?: () => void;
+  onOpenDistributionCostEstimator?: (tokenSymbol: string) => void;
 }
 
 interface AggregatedToken {
@@ -52,6 +54,7 @@ export const SolanaTokenPortfolioModal: React.FC<SolanaTokenPortfolioModalProps>
   onOpenSendToken,
   onFilterByToken,
   onRefreshBalances,
+  onOpenDistributionCostEstimator,
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [expandedToken, setExpandedToken] = useState<string | null>(null);
@@ -197,6 +200,20 @@ export const SolanaTokenPortfolioModal: React.FC<SolanaTokenPortfolioModalProps>
           </div>
 
           <div className="flex items-center gap-2">
+            {onOpenDistributionCostEstimator && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenDistributionCostEstimator('SOL');
+                }}
+                className="btn btn-secondary btn-sm text-[11px] py-1.5 px-2.5 text-[#14F195] border-[#14F195]/30 hover:bg-[#14F195]/10 flex items-center gap-1 font-semibold"
+                title="Open Solana Distribution Cost Estimator"
+              >
+                <Zap className="w-3.5 h-3.5 text-[#14F195]" />
+                <span className="hidden sm:inline">Distribution Cost ⚡</span>
+              </button>
+            )}
             {onRefreshBalances && (
               <button
                 type="button"
@@ -402,6 +419,21 @@ export const SolanaTokenPortfolioModal: React.FC<SolanaTokenPortfolioModalProps>
                           >
                             <Send className="w-3 h-3" />
                             <span>Send</span>
+                          </button>
+                        )}
+
+                        {onOpenDistributionCostEstimator && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onOpenDistributionCostEstimator(token.symbol);
+                            }}
+                            className="btn btn-secondary btn-sm text-[11px] py-1 px-2 text-amber-300 border-amber-500/30 hover:bg-amber-500/10 flex items-center gap-1 font-semibold"
+                            title={`Calculate SOL cost to distribute ${token.symbol} to all wallets`}
+                          >
+                            <Zap className="w-3 h-3 text-amber-400" />
+                            <span>SOL Cost</span>
                           </button>
                         )}
 
