@@ -94,10 +94,12 @@ TON-Mass-Wallet/
 └── package.json               # Project manifest
 ```
 
-## 🔒 Security Notes (2026-10-07 hardening)
+## 🔒 Security Notes (2026-10-08 hardening)
 
 - **Loopback by default**: `server.js` binds to `127.0.0.1`. The vault API (`/api/wallets`) is only reachable from the same machine. Override with `HOST=0.0.0.0` only if you understand the exposure — the API has no authentication.
 - **No wildcard CORS**: the UI is served same-origin; cross-origin browser access to the API is not permitted.
-- **Encrypted vault sync**: with a vault passphrase set, every write path (IndexedDB, localStorage, server file) stores only the PBKDF2+AES-256 encrypted blob. The server never sees plaintext secrets and cannot decrypt them. Without a passphrase, the local `vault_wallets.json` holds plaintext — treat that file like cash.
-- **Backup restores** are restricted to files inside `~/Downloads` (prefix check with trailing separator + is-file verification).
+- **Encrypted vault sync**: new saves use PBKDF2-SHA256 (200,000 iterations), domain-separated verifier/encryption/authentication keys, and AES-256-CBC with HMAC-SHA256 authentication. With a passphrase set, browser storage and the local server receive encrypted vault data, not the encryption key. Use a 12–32 character passphrase. Without a passphrase, the local `vault_wallets.json` holds plaintext — treat that file like cash.
+- **Legacy vault migration warning**: older v2 vaults stored a key-equivalent value as the PIN verifier. Unlock once after upgrading to migrate the active vault to v3 and remove deprecated plaintext browser copies. Any pre-migration vault files/backups that may have been copied or accessed should be treated as exposed; if so, move assets to fresh wallets and securely remove those old copies.
+- **Vault file permissions**: local saves use atomic replacement and owner-only permissions on POSIX systems.
+- **Backup restores** are restricted to real files inside `~/Downloads`; symlinks to files outside that folder are rejected.
 - **Exports are plaintext by design**: CSV/JSON/TXT exports contain seed phrases. They are written to `~/Downloads` — encrypt or delete them when done.

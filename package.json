@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "start": "node server.js",
     "lint": "oxlint",
+    "test": "tsx --test src/services/tokenAmount.test.ts src/services/storageService.test.ts src/services/solanaService.test.ts tests/vaultFile.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

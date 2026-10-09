@@ -5,6 +5,7 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { isFileWithinDirectory, writeVaultFileAtomically } from './vaultFile.js';
 
 function walletStoragePlugin(): Plugin {
   const storeFilePath = path.resolve(process.cwd(), 'vault_wallets.json');
@@ -61,7 +62,7 @@ function walletStoragePlugin(): Plugin {
               const content = fs.readFileSync(latest.fullPath, 'utf8');
               const parsed = JSON.parse(content);
               // Save to store file
-              fs.writeFileSync(storeFilePath, JSON.stringify(parsed, null, 2), 'utf8');
+              writeVaultFileAtomically(storeFilePath, parsed);
               return res.end(JSON.stringify({
                 success: true,
                 source: 'download_backup',
@@ -105,7 +106,7 @@ function walletStoragePlugin(): Plugin {
                     wallets: parsed.wallets || [],
                     vaultConfig: parsed.vaultConfig || { isLocked: false, hasPin: false },
                   };
-              fs.writeFileSync(storeFilePath, JSON.stringify(toSave, null, 2), 'utf8');
+              writeVaultFileAtomically(storeFilePath, toSave);
               res.setHeader('Content-Type', 'application/json');
               return res.end(JSON.stringify({ success: true, count: toSave.totalWallets }));
             } catch (err: any) {
@@ -132,14 +133,17 @@ function walletStoragePlugin(): Plugin {
             try {
               const { filePath } = JSON.parse(body);
               const downloadsDir = path.resolve(os.homedir(), 'Downloads');
+              if (typeof filePath !== 'string' || filePath.trim() === '') {
+                res.statusCode = 403;
+                res.setHeader('Content-Type', 'application/json');
+                return res.end(JSON.stringify({ success: false, error: 'Access denied: File must be located in Downloads directory' }));
+              }
               const resolvedPath = path.resolve(filePath);
 
               // Prevent arbitrary file reads / path traversal (trailing
               // separator matters: ~/Downloads2/x must not pass).
               const downloadsRoot = downloadsDir.endsWith(path.sep) ? downloadsDir : downloadsDir + path.sep;
-              let stat = null;
-              try { stat = fs.statSync(resolvedPath); } catch { stat = null; }
-              if (!filePath || !resolvedPath.startsWith(downloadsRoot) || !stat || !stat.isFile()) {
+              if (!resolvedPath.startsWith(downloadsRoot) || !isFileWithinDirectory(resolvedPath, downloadsDir)) {
                 res.statusCode = 403;
                 res.setHeader('Content-Type', 'application/json');
                 return res.end(JSON.stringify({ success: false, error: 'Access denied: File must be located in Downloads directory' }));
@@ -147,7 +151,7 @@ function walletStoragePlugin(): Plugin {
 
               const content = fs.readFileSync(resolvedPath, 'utf8');
               const parsed = JSON.parse(content);
-              fs.writeFileSync(storeFilePath, JSON.stringify(parsed, null, 2), 'utf8');
+              writeVaultFileAtomically(storeFilePath, parsed);
               res.setHeader('Content-Type', 'application/json');
               return res.end(JSON.stringify({ success: true, ...parsed }));
             } catch (err: any) {

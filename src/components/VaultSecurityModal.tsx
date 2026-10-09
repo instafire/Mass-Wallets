@@ -25,8 +25,8 @@ export const VaultSecurityModal: React.FC<VaultSecurityModalProps> = ({
   if (!isOpen) return null;
 
   const handleSetPin = () => {
-    if (pin.length < 4) {
-      setError('Passphrase must be at least 4 characters');
+    if (pin.trim().length < 12 || pin.trim().length > 32) {
+      setError('Passphrase must be between 12 and 32 characters');
       return;
     }
     if (pin !== confirmPin) {
@@ -42,7 +42,7 @@ export const VaultSecurityModal: React.FC<VaultSecurityModalProps> = ({
   };
 
   const handleRemovePin = () => {
-    if (confirm('Are you sure you want to remove PIN encryption from local storage?')) {
+    if (confirm('Removing passphrase protection stores seed phrases and private keys in plaintext in browser storage and the local vault file. Continue?')) {
       StorageService.removeVaultPin(wallets);
       onVaultConfigUpdated();
       onClose();
@@ -61,7 +61,7 @@ export const VaultSecurityModal: React.FC<VaultSecurityModalProps> = ({
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">Vault Security & PIN</h2>
-              <p className="text-xs text-gray-400">PBKDF2 + AES-256 encryption for the whole vault</p>
+              <p className="text-xs text-gray-400">PBKDF2 + authenticated AES-256 encryption for the whole vault</p>
             </div>
           </div>
           <button 
@@ -82,8 +82,8 @@ export const VaultSecurityModal: React.FC<VaultSecurityModalProps> = ({
                 <div>
                   <h4 className="text-sm font-bold text-white">Vault Protected with PIN</h4>
                   <p className="text-xs text-emerald-300/80">
-                    Seed phrases and private keys are encrypted with PBKDF2 + AES-256 — in the browser
-                    and in the local vault file. The server only ever stores the encrypted blob.
+                    New saves use separate passphrase-verifier and encryption keys with authenticated AES-256.
+                    Older vaults are migrated after a successful unlock.
                   </p>
                 </div>
               </div>
@@ -101,8 +101,8 @@ export const VaultSecurityModal: React.FC<VaultSecurityModalProps> = ({
             <div className="space-y-4">
               <p className="text-xs text-gray-400">
                 Set a master passphrase to encrypt all wallets and seed phrases — in the browser
-                <em>and</em> in the local server vault file. Minimum 4 characters; 12+ recommended.
-                Longer is stronger: this uses PBKDF2-SHA256 with 200,000 iterations.
+                <em>and</em> in the local server vault file. Use 12–32 characters; longer passphrases
+                are stronger. PBKDF2-SHA256 uses 200,000 iterations.
               </p>
 
               <div>
@@ -115,7 +115,8 @@ export const VaultSecurityModal: React.FC<VaultSecurityModalProps> = ({
                     setPin(e.target.value);
                     setError(null);
                   }}
-                  placeholder="4–32 characters"
+                  minLength={12}
+                  placeholder="12–32 characters"
                   className="input-field text-center font-mono text-base tracking-widest py-2"
                 />
               </div>
@@ -130,6 +131,7 @@ export const VaultSecurityModal: React.FC<VaultSecurityModalProps> = ({
                     setConfirmPin(e.target.value);
                     setError(null);
                   }}
+                  minLength={12}
                   placeholder="Re-enter passphrase"
                   className="input-field text-center font-mono text-base tracking-widest py-2"
                 />

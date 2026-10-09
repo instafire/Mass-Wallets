@@ -167,7 +167,7 @@ export interface VaultConfig {
   hasPin: boolean;
   pinHash?: string;      // PBKDF2 verifier (v2) or legacy SHA-256 (v1)
   pinSalt?: string;      // v2: random salt for the verifier KDF
-  pinKdf?: 'pbkdf2-sha256';
+  pinKdf?: 'pbkdf2-sha256' | 'pbkdf2-sha256-v3';
   lastBackupAt?: number;
 }
 

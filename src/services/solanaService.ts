@@ -12,6 +12,8 @@ import * as bip39 from 'bip39';
 import { derivePath } from 'ed25519-hd-key';
 import * as squads from '@sqds/multisig';
 import { PriceService } from './priceService';
+import { parseTokenUnits } from './tokenAmount';
+export { parseTokenUnits } from './tokenAmount';
 import type { 
   ManagedWallet, 
   WalletVersion, 
@@ -29,22 +31,6 @@ export function formatBigIntUnits(raw: bigint, decimals: number): string {
   const intPart = s.slice(0, s.length - decimals);
   const fracPart = s.slice(s.length - decimals).replace(/0+$/, '');
   return fracPart.length > 0 ? `${sign}${intPart}.${fracPart}` : `${sign}${intPart}`;
-}
-
-/** Parse human-readable or exponential numbers/strings into exact bigint atomic units */
-export function parseTokenUnits(amount: number | string, decimals: number): bigint {
-  const str = String(amount).trim();
-  if (str.includes('e') || str.includes('E')) {
-    const num = Number(str);
-    if (!Number.isFinite(num) || num <= 0) return 0n;
-    const fixed = num.toFixed(decimals);
-    const [intP, fracP = ''] = fixed.split('.');
-    const fracPadded = (fracP + '0'.repeat(decimals)).slice(0, decimals);
-    return BigInt(intP.replace(/\D/g, '') || '0') * (10n ** BigInt(decimals)) + BigInt(fracPadded.replace(/\D/g, '') || '0');
-  }
-  const [amtInt = '0', amtFrac = ''] = str.split('.');
-  const amtFracPadded = (amtFrac + '0'.repeat(decimals)).slice(0, decimals);
-  return BigInt(amtInt.replace(/\D/g, '') || '0') * (10n ** BigInt(decimals)) + BigInt(amtFracPadded.replace(/\D/g, '') || '0');
 }
 
 // Squads Protocol v4 Program ID (Verified Mainnet & Devnet)
@@ -337,6 +323,10 @@ export class SolanaService {
 
     if (words.length !== 12 && words.length !== 24) {
       throw new Error(`Invalid mnemonic phrase length (${words.length} words). Solana seed phrases must be 12 or 24 words.`);
+    }
+
+    if (!bip39.validateMnemonic(words.join(' '))) {
+      throw new Error('Invalid mnemonic: checksum/wordlist validation failed. Check the words and try again.');
     }
 
     const keypair = await this.deriveKeypairFromMnemonic(words);
@@ -648,11 +638,14 @@ export class SolanaService {
         preflightCommitment: 'confirmed',
       });
 
-      await connection.confirmTransaction({
+      const confirmation = await connection.confirmTransaction({
         signature: txHash,
         blockhash,
         lastValidBlockHeight,
       }, 'confirmed');
+      if (confirmation.value.err) {
+        throw new Error(`Transaction confirmed with an on-chain error: ${JSON.stringify(confirmation.value.err)}`);
+      }
 
       return { txHash, success: true };
     } catch (err: any) {
@@ -1067,11 +1060,14 @@ export class SolanaService {
         preflightCommitment: 'confirmed',
       });
 
-      await connection.confirmTransaction({
+      const confirmation = await connection.confirmTransaction({
         signature: txHash,
         blockhash,
         lastValidBlockHeight,
       }, 'confirmed');
+      if (confirmation.value.err) {
+        throw new Error(`Transaction confirmed with an on-chain error: ${JSON.stringify(confirmation.value.err)}`);
+      }
 
       return { txHash, success: true };
     } catch (err: any) {
@@ -1094,11 +1090,14 @@ export class SolanaService {
       const lamports = Math.round(amountSol * LAMPORTS_PER_SOL);
       const sig = await connection.requestAirdrop(pubkey, lamports);
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-      await connection.confirmTransaction({
+      const confirmation = await connection.confirmTransaction({
         signature: sig,
         blockhash,
         lastValidBlockHeight,
       }, 'confirmed');
+      if (confirmation.value.err) {
+        throw new Error(`Airdrop confirmed with an on-chain error: ${JSON.stringify(confirmation.value.err)}`);
+      }
       return { success: true, txHash: sig };
     } catch (e: any) {
       console.warn('Solana airdrop request failed:', e);
@@ -1277,4 +1276,3 @@ export class SolanaService {
     return updated;
   }
 }
-
