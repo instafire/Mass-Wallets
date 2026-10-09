@@ -42,7 +42,7 @@ URL="http://localhost:${PORT}"
 ICON_PATH="$DIR/icon.png"
 
 is_running() {
-    curl -s --connect-timeout 1 "$URL/api/health" 2>/dev/null | grep -q "TON Mass Wallet Studio"
+    curl --fail --silent --show-error --connect-timeout 1 "$URL/api/health" 2>/dev/null | grep -q '"app":"Mass Wallet"'
 }
 
 # 3. Start server if not already running

@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { isFileWithinDirectory, writeVaultFileAtomically } from './vaultFile.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -266,7 +267,7 @@ function sanitizeWallets(wallets) {
         if (Array.isArray(parsed.wallets)) {
           parsed.wallets = sanitizeWallets(parsed.wallets);
         }
-        fs.writeFileSync(STORE_FILE, JSON.stringify(parsed, null, 2), 'utf8');
+        writeVaultFileAtomically(STORE_FILE, parsed);
         return sendJson(res, 200, {
           success: true,
           source: 'download_backup',
@@ -289,10 +290,9 @@ function sanitizeWallets(wallets) {
 
   // 3. POST /api/wallets
   // Accepts either { wallets: [...], vaultConfig } (legacy plaintext local
-  // sync) or { encrypted: true, payload: "<opaque AES blob>", vaultConfig }
-  // when the vault is PIN-locked. The server NEVER decrypts: an encrypted
-  // payload is stored and returned opaquely; only the browser holding the
-  // PIN can read it.
+  // sync) or { encrypted: true, payload: "<opaque authenticated blob>", vaultConfig }
+  // when the vault is passphrase-protected. The server never decrypts v3; old
+  // v2 files are migrated by the client after a successful unlock.
   if (pathname === '/api/wallets' && req.method === 'POST') {
     try {
       const rawBody = await readBody(req);
@@ -323,10 +323,7 @@ function sanitizeWallets(wallets) {
         };
       }
 
-      // Atomic write using temp file
-      const tempFile = `${STORE_FILE}.tmp.${Date.now()}`;
-      fs.writeFileSync(tempFile, JSON.stringify(toSave, null, 2), 'utf8');
-      fs.renameSync(tempFile, STORE_FILE);
+      writeVaultFileAtomically(STORE_FILE, toSave);
 
       return sendJson(res, 200, { success: true, count, encrypted: !!toSave.encrypted });
     } catch (err) {
@@ -346,15 +343,16 @@ function sanitizeWallets(wallets) {
     try {
       const rawBody = await readBody(req);
       const { filePath } = JSON.parse(rawBody);
+      if (typeof filePath !== 'string' || filePath.trim() === '') {
+        return sendJson(res, 403, { success: false, error: 'Access denied: File must be located in Downloads directory' });
+      }
       const resolvedPath = path.resolve(filePath);
 
       // Security check: restrict restore paths to ~/Downloads.
       // The trailing separator matters: without it, ~/Downloads2/evil.json
       // would pass the prefix check.
       const downloadsRoot = DOWNLOADS_DIR.endsWith(path.sep) ? DOWNLOADS_DIR : DOWNLOADS_DIR + path.sep;
-      let stat = null;
-      try { stat = fs.statSync(resolvedPath); } catch { stat = null; }
-      if (!filePath || !resolvedPath.startsWith(downloadsRoot) || !stat || !stat.isFile()) {
+      if (!resolvedPath.startsWith(downloadsRoot) || !isFileWithinDirectory(resolvedPath, DOWNLOADS_DIR)) {
         return sendJson(res, 403, {
           success: false,
           error: 'Access denied: File must be located in Downloads directory',
@@ -365,9 +363,7 @@ function sanitizeWallets(wallets) {
       const parsed = JSON.parse(content);
       
       // Save to active store
-      const tempFile = `${STORE_FILE}.tmp.${Date.now()}`;
-      fs.writeFileSync(tempFile, JSON.stringify(parsed, null, 2), 'utf8');
-      fs.renameSync(tempFile, STORE_FILE);
+      writeVaultFileAtomically(STORE_FILE, parsed);
 
       return sendJson(res, 200, { success: true, ...parsed });
     } catch (err) {

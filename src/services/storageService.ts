@@ -30,14 +30,16 @@ const STORE_NAME = 'wallets_store';
 //
 // A PIN/passphrase set in VaultSecurityModal protects secrets at rest.
 // Key derivation: PBKDF2-SHA256, 200k iterations, random 128-bit salt.
-// Payload v2: { encrypted: true, v: 2, kdf, iter, salt, data }.
+// Payload v3 uses domain-separated AES/HMAC keys and authenticates metadata
+// and ciphertext. v1/v2 payloads remain readable for one-time migration.
 //
-// SECURITY CONTRACT (fixed 2026-10-07 — previously the PIN only encrypted
-// the browser copy while every save POSTed plaintext mnemonics to the local
-// server file):
-//  - When a PIN is active (sessionPin set), the server sync sends ONLY the
-//    opaque encrypted blob. The server never sees plaintext secrets and
-//    cannot decrypt them.
+// SECURITY CONTRACT (2026-10-08):
+//  - v3 stores a domain-separated HMAC verifier, never the PBKDF2 root key;
+//    AES and authentication subkeys are derived independently.
+//  - Legacy v2 reused its PBKDF2 encryption key as the stored verifier. A
+//    successful unlock rekeys and rewrites that vault as v3.
+//  - With a PIN active, server sync sends only the authenticated encrypted
+//    blob and a one-way verifier; the server does not receive plaintext keys.
 //  - persistWallets() no longer strips the PIN: saveWallets() falls back to
 //    the session PIN automatically, so every write path stays encrypted.
 // ---------------------------------------------------------------------------
@@ -49,13 +51,13 @@ const sessionKeyCache = new Map<string, string>();
 
 /** Remember the PIN for this browser session after unlock / PIN creation. Never persisted. */
 export function setSessionPin(pin: string | null): void {
-  sessionPin = pin && pin.trim().length >= 4 ? pin.trim() : null;
-  sessionKeyCache.clear();
-  // Prime the cache so the first save after unlock isn't slow.
-  if (sessionPin) {
-    const salt = getVaultSalt();
-    sessionKeyCache.set(salt, deriveKey(sessionPin, salt));
+  const normalizedPin = pin && pin.trim().length >= 4 ? pin.trim() : null;
+  if (!normalizedPin) {
+    clearSessionPin();
+    return;
   }
+  const salt = getVaultSalt();
+  armSessionPin(normalizedPin, salt, deriveKey(normalizedPin, salt));
 }
 
 export function clearSessionPin(): void {
@@ -103,6 +105,16 @@ function deriveKey(pin: string, saltHex: string): string {
   }).toString(CryptoJS.enc.Hex);
 }
 
+type VaultKeyPurpose = 'verifier' | 'encryption' | 'authentication';
+
+/** Derive independent keys so the stored PIN verifier is never the vault key. */
+function deriveSubkey(rootKeyHex: string, purpose: VaultKeyPurpose): string {
+  return CryptoJS.HmacSHA256(
+    `ton-mass-wallet:v3:${purpose}`,
+    CryptoJS.enc.Hex.parse(rootKeyHex)
+  ).toString(CryptoJS.enc.Hex);
+}
+
 function newSalt(): string {
   return CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
 }
@@ -115,6 +127,29 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+function armSessionPin(pin: string, salt: string, rootKey: string): void {
+  sessionPin = pin;
+  sessionKeyCache.clear();
+  sessionKeyCache.set(salt, rootKey);
+}
+
+function verifyPinWithRoot(config: VaultConfig, pin: string): { ok: boolean; salt?: string; rootKey?: string } {
+  if (!config.hasPin || !config.pinHash) return { ok: true };
+  const input = pin.trim();
+
+  if ((config.pinKdf === 'pbkdf2-sha256-v3' || config.pinKdf === 'pbkdf2-sha256') && config.pinSalt) {
+    const rootKey = (sessionPin === input && sessionKeyCache.get(config.pinSalt))
+      || deriveKey(input, config.pinSalt);
+    const candidate = config.pinKdf === 'pbkdf2-sha256-v3'
+      ? deriveSubkey(rootKey, 'verifier')
+      : rootKey;
+    return { ok: constantTimeEqual(candidate, config.pinHash), salt: config.pinSalt, rootKey };
+  }
+
+  const legacy = CryptoJS.SHA256(input).toString();
+  return { ok: constantTimeEqual(legacy, config.pinHash) };
+}
+
 export interface EncryptedPayloadV2 {
   encrypted: true;
   v: 2;
@@ -125,30 +160,88 @@ export interface EncryptedPayloadV2 {
   timestamp: number;
 }
 
-function encryptWalletsV2(jsonString: string, pin: string): string {
+export interface EncryptedPayloadV3 {
+  encrypted: true;
+  v: 3;
+  kdf: 'pbkdf2-sha256';
+  iter: number;
+  salt: string;
+  data: string;
+  mac: string;
+  timestamp: number;
+}
+
+function v3MacInput(payload: Omit<EncryptedPayloadV3, 'mac'>): string {
+  return JSON.stringify({
+    encrypted: payload.encrypted,
+    v: payload.v,
+    kdf: payload.kdf,
+    iter: payload.iter,
+    salt: payload.salt,
+    data: payload.data,
+    timestamp: payload.timestamp,
+  });
+}
+
+function encryptWalletsV3(jsonString: string, pin: string): string {
   const salt = getVaultSalt();
-  // Prefer the session-derived key (fast); fall back to a fresh derivation
-  // when encrypting outside an active session (e.g. setVaultPin primes it).
-  const keyHex = getSessionKey(salt) || deriveKey(pin, salt);
-  // NOTE: crypto-js 4.x does not auto-generate an IV when the key is a
-  // WordArray — pass one explicitly (verified by execution, not just types).
+  const cachedRootKey = sessionPin === pin ? getSessionKey(salt) : null;
+  const rootKey = cachedRootKey || deriveKey(pin, salt);
+  const encryptionKey = deriveSubkey(rootKey, 'encryption');
+  const authenticationKey = deriveSubkey(rootKey, 'authentication');
   const iv = CryptoJS.lib.WordArray.random(16);
-  const encrypted = CryptoJS.AES.encrypt(jsonString, CryptoJS.enc.Hex.parse(keyHex), {
+  const encrypted = CryptoJS.AES.encrypt(jsonString, CryptoJS.enc.Hex.parse(encryptionKey), {
     iv,
     mode: CryptoJS.mode.CBC,
     padding: CryptoJS.pad.Pkcs7,
   });
-  // Store IV + ciphertext together
-  const payload: EncryptedPayloadV2 = {
+  const payloadWithoutMac: Omit<EncryptedPayloadV3, 'mac'> = {
     encrypted: true,
-    v: 2,
+    v: 3,
     kdf: 'pbkdf2-sha256',
     iter: PBKDF2_ITER,
     salt,
     data: encrypted.iv.toString(CryptoJS.enc.Hex) + ':' + encrypted.ciphertext.toString(CryptoJS.enc.Hex),
     timestamp: Date.now(),
   };
-  return JSON.stringify(payload);
+  const mac = CryptoJS.HmacSHA256(v3MacInput(payloadWithoutMac), CryptoJS.enc.Hex.parse(authenticationKey))
+    .toString(CryptoJS.enc.Hex);
+  return JSON.stringify({ ...payloadWithoutMac, mac } satisfies EncryptedPayloadV3);
+}
+
+function decryptWalletsV3(payload: EncryptedPayloadV3, pin: string): string | null {
+  try {
+    if (
+      payload.v !== 3 ||
+      payload.kdf !== 'pbkdf2-sha256' ||
+      payload.iter !== PBKDF2_ITER ||
+      !/^[0-9a-f]{32}$/i.test(payload.salt) ||
+      !Number.isFinite(payload.timestamp) ||
+      !/^[0-9a-f]{64}$/i.test(payload.mac)
+    ) return null;
+
+    const dataMatch = /^([0-9a-f]{32}):([0-9a-f]{32,})$/i.exec(payload.data);
+    if (!dataMatch || dataMatch[2].length % 32 !== 0) return null;
+
+    const rootKey = (sessionPin && pin.trim() === sessionPin && sessionKeyCache.get(payload.salt))
+      || deriveKey(pin.trim(), payload.salt);
+    const authenticationKey = deriveSubkey(rootKey, 'authentication');
+    const expectedMac = CryptoJS.HmacSHA256(
+      v3MacInput(payload),
+      CryptoJS.enc.Hex.parse(authenticationKey)
+    ).toString(CryptoJS.enc.Hex);
+    if (!constantTimeEqual(expectedMac, payload.mac.toLowerCase())) return null;
+
+    const encryptionKey = deriveSubkey(rootKey, 'encryption');
+    const decrypted = CryptoJS.AES.decrypt(
+      { ciphertext: CryptoJS.enc.Hex.parse(dataMatch[2]) } as any,
+      CryptoJS.enc.Hex.parse(encryptionKey),
+      { iv: CryptoJS.enc.Hex.parse(dataMatch[1]), mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+    );
+    return decrypted.toString(CryptoJS.enc.Utf8) || null;
+  } catch {
+    return null;
+  }
 }
 
 function decryptWalletsV2(payload: EncryptedPayloadV2, pin: string): string | null {
@@ -388,7 +481,7 @@ export class StorageService {
     let isEnc = false;
 
     if (effectivePin) {
-      payloadToStore = encryptWalletsV2(jsonString, effectivePin);
+      payloadToStore = encryptWalletsV3(jsonString, effectivePin);
       isEnc = true;
     } else {
       payloadToStore = JSON.stringify({ encrypted: false, data: jsonString, timestamp: Date.now() });
@@ -401,6 +494,13 @@ export class StorageService {
     try {
       localStorage.setItem(STORAGE_KEY_WALLETS, payloadToStore);
       localStorage.setItem(STORAGE_KEY_BACKUP_ALT, payloadToStore);
+      if (isEnc) {
+        for (const key of LEGACY_STORAGE_KEYS) {
+          if (key !== STORAGE_KEY_WALLETS && key !== STORAGE_KEY_BACKUP_ALT) {
+            localStorage.removeItem(key);
+          }
+        }
+      }
     } catch (e) {
       console.warn('LocalStorage quota limit reached; IndexedDB holds primary copy.', e);
     }
@@ -427,26 +527,55 @@ export class StorageService {
 
   /**
    * Parse stored string / payload safely.
-   * Handles: v2 PBKDF2 payloads, legacy v1 PIN payloads, plaintext arrays.
+   * Handles: authenticated v3 payloads, legacy v2/v1 payloads, plaintext arrays.
    */
-  public static parseStoredData(item: string, pin?: string): { wallets: ManagedWallet[]; isEncrypted: boolean; error?: string } {
+  public static parseStoredData(item: string, pin?: string, configOverride?: VaultConfig): { wallets: ManagedWallet[]; isEncrypted: boolean; error?: string } {
     try {
       const parsed = JSON.parse(item);
+      const expectedConfig = configOverride || this.getVaultConfig();
+      const parsePlainWallets = (wallets: any[]) => {
+        if (!expectedConfig.hasPin) return { wallets: normalizeWallets(wallets), isEncrypted: false };
+        if (!pin) return { wallets: [], isEncrypted: true };
+        if (expectedConfig.pinKdf === 'pbkdf2-sha256-v3') {
+          return { wallets: [], isEncrypted: true, error: 'Vault format downgrade rejected. Restore a valid authenticated vault copy.' };
+        }
+        if (!verifyPinWithRoot(expectedConfig, pin).ok) {
+          return { wallets: [], isEncrypted: true, error: 'Incorrect PIN code' };
+        }
+        // Legacy plaintext is released only after passphrase verification and
+        // remains marked encrypted so the unlock flow immediately migrates it.
+        return { wallets: normalizeWallets(wallets), isEncrypted: true };
+      };
 
       // Raw array
       if (Array.isArray(parsed)) {
-        return { wallets: normalizeWallets(parsed), isEncrypted: false };
+        return parsePlainWallets(parsed);
       }
 
       // Object with .wallets array
       if (Array.isArray(parsed.wallets)) {
-        return { wallets: normalizeWallets(parsed.wallets), isEncrypted: false };
+        return parsePlainWallets(parsed.wallets);
       }
 
       // Encrypted payload (v2 PBKDF2 or legacy v1)
       if (parsed.encrypted) {
         if (!pin) {
           return { wallets: [], isEncrypted: true };
+        }
+        if (parsed.v === 3) {
+          if (!parsed.salt || !parsed.data || !parsed.mac) {
+            return { wallets: [], isEncrypted: true, error: 'Invalid or incomplete authenticated vault payload.' };
+          }
+          const decryptedStr = decryptWalletsV3(parsed as EncryptedPayloadV3, pin.trim());
+          if (decryptedStr) {
+            const rawWallets = JSON.parse(decryptedStr);
+            const list = Array.isArray(rawWallets) ? rawWallets : (rawWallets.wallets || []);
+            return { wallets: normalizeWallets(list), isEncrypted: true };
+          }
+          return { wallets: [], isEncrypted: true, error: 'Vault authentication failed or the passphrase is incorrect.' };
+        }
+        if (expectedConfig.pinKdf === 'pbkdf2-sha256-v3') {
+          return { wallets: [], isEncrypted: true, error: 'Vault format downgrade rejected. Restore a valid authenticated vault copy.' };
         }
         // v2 first
         if (parsed.v === 2 && parsed.salt && parsed.data) {
@@ -478,10 +607,10 @@ export class StorageService {
         } else if (Array.isArray(parsed.data)) {
           extracted = parsed.data;
         }
-        return { wallets: normalizeWallets(extracted), isEncrypted: false };
+        return parsePlainWallets(extracted);
       }
 
-      return { wallets: [], isEncrypted: false };
+      return { wallets: [], isEncrypted: !!expectedConfig.hasPin };
     } catch (e) {
       console.error('Failed to parse storage item:', e);
       return { wallets: [], isEncrypted: false, error: 'Corrupt storage data' };
@@ -503,7 +632,7 @@ export class StorageService {
         }
       }
 
-      return { wallets: [], isEncrypted: false };
+      return { wallets: [], isEncrypted: !!this.getVaultConfig().hasPin };
     } catch (e) {
       console.error('Failed to load wallets from storage:', e);
       return { wallets: [], isEncrypted: false, error: 'Corrupt storage data' };
@@ -514,7 +643,7 @@ export class StorageService {
    * Comprehensive async loader: Checks Backend API -> IndexedDB -> LocalStorage
    * Authoritative backend API (/api/wallets) is checked first when running with local server.
    */
-  public static async loadAllWalletsAsync(pin?: string): Promise<{ wallets: ManagedWallet[]; isEncrypted: boolean; config: VaultConfig }> {
+  public static async loadAllWalletsAsync(pin?: string): Promise<{ wallets: ManagedWallet[]; isEncrypted: boolean; config: VaultConfig; error?: string }> {
     const config = this.getVaultConfig();
 
     // 1. Try Backend API (/api/wallets) first if available
@@ -523,28 +652,76 @@ export class StorageService {
       if (resp.ok) {
         const json = await resp.json();
         const serverConfig: VaultConfig = json.vaultConfig || config;
+        const acceptedConfig = config.pinKdf === 'pbkdf2-sha256-v3' && serverConfig.pinKdf !== 'pbkdf2-sha256-v3'
+          ? config
+          : serverConfig;
 
         if (json && json.encrypted === true && typeof json.payload === 'string') {
-          // Encrypted vault on server: seed the local encrypted caches
-          try {
-            localStorage.setItem(STORAGE_KEY_WALLETS, json.payload);
-            localStorage.setItem(STORAGE_KEY_BACKUP_ALT, json.payload);
-          } catch { /* quota — IndexedDB still primary */ }
-          await idbSet('wallets_payload', { encrypted: true, raw: json.payload, wallets: [], timestamp: Date.now() });
-          if (serverConfig) {
-            localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(serverConfig));
-          }
           if (pin) {
-            const parsed = this.parseStoredData(json.payload, pin);
-            if (parsed.wallets.length > 0) {
-              return { wallets: parsed.wallets, isEncrypted: true, config: serverConfig };
+            const parsed = this.parseStoredData(json.payload, pin, acceptedConfig);
+            if (parsed.error) {
+              // Do not let a damaged server copy replace a usable local backup.
+              const idbData: any = await idbGet('wallets_payload');
+              if (idbData?.encrypted) {
+                const idbRes = this.parseStoredData(idbData.raw, pin);
+                if (idbRes.isEncrypted && !idbRes.error) return { wallets: idbRes.wallets, isEncrypted: true, config };
+              }
+              const localRes = this.loadWallets(pin);
+              if (localRes.isEncrypted && !localRes.error) return { wallets: localRes.wallets, isEncrypted: true, config };
+              return { wallets: [], isEncrypted: true, config: acceptedConfig, error: parsed.error };
             }
+            if (parsed.isEncrypted) {
+              try {
+                localStorage.setItem(STORAGE_KEY_WALLETS, json.payload);
+                localStorage.setItem(STORAGE_KEY_BACKUP_ALT, json.payload);
+                localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(acceptedConfig));
+              } catch { /* quota — IndexedDB still primary */ }
+              await idbSet('wallets_payload', { encrypted: true, raw: json.payload, wallets: [], timestamp: Date.now() });
+              return { wallets: parsed.wallets, isEncrypted: true, config: acceptedConfig };
+            }
+            return { wallets: [], isEncrypted: true, config: acceptedConfig, error: 'Server vault payload is not a valid encrypted vault.' };
           }
-          return { wallets: [], isEncrypted: true, config: serverConfig };
+
+          // On a locked startup, only seed absent caches; preserve any existing
+          // backup until the server payload can be authenticated on unlock.
+          try {
+            if (!localStorage.getItem(STORAGE_KEY_WALLETS)) {
+              localStorage.setItem(STORAGE_KEY_WALLETS, json.payload);
+              localStorage.setItem(STORAGE_KEY_BACKUP_ALT, json.payload);
+              await idbSet('wallets_payload', { encrypted: true, raw: json.payload, wallets: [], timestamp: Date.now() });
+            }
+            if (!config.hasPin) localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(acceptedConfig));
+          } catch { /* quota — server copy remains authoritative */ }
+
+          return { wallets: [], isEncrypted: true, config: config.hasPin ? config : acceptedConfig };
         }
 
         if (json && Array.isArray(json.wallets) && json.wallets.length > 0) {
+          // A v3 vault must never fall back to a plaintext server response.
+          // Ignore it and prefer authenticated local backups instead.
+          if (config.pinKdf === 'pbkdf2-sha256-v3') {
+            // Continue to IndexedDB and LocalStorage below.
+          } else {
           const normalized = normalizeWallets(json.wallets);
+          const protectionConfig = serverConfig.hasPin ? serverConfig : config;
+          if (protectionConfig.hasPin) {
+            if (!config.hasPin && serverConfig.hasPin) {
+              try { localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(serverConfig)); } catch { /* handled as locked below */ }
+            }
+            const effectiveConfig = config.hasPin ? config : serverConfig;
+            if (!pin) {
+              return { wallets: [], isEncrypted: true, config: effectiveConfig };
+            }
+            if (protectionConfig.pinKdf === 'pbkdf2-sha256-v3') {
+              return { wallets: [], isEncrypted: true, config: effectiveConfig, error: 'Vault format downgrade rejected. Restore a valid authenticated vault copy.' };
+            }
+            if (!verifyPinWithRoot(effectiveConfig, pin).ok) {
+              return { wallets: [], isEncrypted: true, config: effectiveConfig, error: 'Incorrect PIN code' };
+            }
+            // Legacy local-server data may still be plaintext. Release it only
+            // after PIN verification and mark it for immediate v3 migration.
+            return { wallets: normalized, isEncrypted: true, config: effectiveConfig };
+          }
 
           // Update local IndexedDB & LocalStorage so offline mode stays in sync with server truth
           await idbSet('wallets_payload', { 
@@ -561,6 +738,7 @@ export class StorageService {
           }
 
           return { wallets: normalized, isEncrypted: false, config: serverConfig };
+          }
         }
       }
     } catch (err) {
@@ -574,14 +752,22 @@ export class StorageService {
         if (idbData.encrypted) {
           if (pin) {
             const parsed = this.parseStoredData(idbData.raw, pin);
-            if (parsed.wallets.length > 0) {
-              return { wallets: parsed.wallets, isEncrypted: true, config };
-            }
+            if (!parsed.error && parsed.isEncrypted) return { wallets: parsed.wallets, isEncrypted: true, config };
           } else {
             return { wallets: [], isEncrypted: true, config };
           }
         } else if (Array.isArray(idbData.wallets) && idbData.wallets.length > 0) {
-          return { wallets: normalizeWallets(idbData.wallets), isEncrypted: false, config };
+          const normalized = normalizeWallets(idbData.wallets);
+          if (config.hasPin) {
+            if (!pin) return { wallets: [], isEncrypted: true, config };
+            if (config.pinKdf !== 'pbkdf2-sha256-v3' && verifyPinWithRoot(config, pin).ok) {
+              return { wallets: normalized, isEncrypted: true, config };
+            }
+            // Invalid, stale, or downgraded IndexedDB data must not hide a
+            // usable LocalStorage backup; the latter remains lock-gated too.
+          } else {
+            return { wallets: normalized, isEncrypted: false, config };
+          }
         }
       }
     } catch (err) {
@@ -595,10 +781,10 @@ export class StorageService {
       if (localRes.wallets.length > 0 && !localRes.isEncrypted) {
         idbSet('wallets_payload', { encrypted: false, wallets: localRes.wallets, timestamp: Date.now() });
       }
-      return { wallets: localRes.wallets, isEncrypted: localRes.isEncrypted, config };
+      return { wallets: localRes.wallets, isEncrypted: localRes.isEncrypted, config, error: localRes.error };
     }
 
-    return { wallets: [], isEncrypted: false, config };
+    return { wallets: [], isEncrypted: !!config.hasPin, config };
   }
 
   /**
@@ -654,24 +840,28 @@ export class StorageService {
 
   /**
    * Set or update Vault PIN protection.
-   * Stores a PBKDF2 verifier (salt + derived hash) — never the PIN, never a
-   * fast unsalted hash. Also arms the session PIN so subsequent saves stay
+   * Stores a domain-separated one-way verifier — never the PIN or encryption
+   * key. Also arms the session PIN so subsequent saves stay
    * encrypted without re-prompting.
    */
   public static setVaultPin(wallets: ManagedWallet[], newPin: string): void {
     const pin = newPin.trim();
+    if (pin.length < 12 || pin.length > 32) {
+      throw new Error('Vault passphrases must be between 12 and 32 characters.');
+    }
     const salt = newSalt();
-    const verifier = deriveKey(pin, salt); // PBKDF2-SHA256, 200k iterations
+    const rootKey = deriveKey(pin, salt);
+    const verifier = deriveSubkey(rootKey, 'verifier');
     const config: VaultConfig = {
       isLocked: false,
       hasPin: true,
       pinHash: verifier,
       pinSalt: salt,
-      pinKdf: 'pbkdf2-sha256',
+      pinKdf: 'pbkdf2-sha256-v3',
       lastBackupAt: Date.now(),
     };
     localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(config));
-    setSessionPin(pin);
+    armSessionPin(pin, salt, rootKey);
     this.saveWallets(wallets, pin);
   }
 
@@ -689,16 +879,7 @@ export class StorageService {
    * Legacy vaults with a plain SHA-256 pinHash still verify via the old path.
    */
   public static verifyPin(pin: string): boolean {
-    const config = this.getVaultConfig();
-    if (!config.hasPin || !config.pinHash) return true;
-    const input = pin.trim();
-    if (config.pinKdf === 'pbkdf2-sha256' && config.pinSalt) {
-      const candidate = deriveKey(input, config.pinSalt);
-      return constantTimeEqual(candidate, config.pinHash);
-    }
-    // legacy: unsalted SHA-256
-    const legacy = CryptoJS.SHA256(input).toString();
-    return constantTimeEqual(legacy, config.pinHash);
+    return verifyPinWithRoot(this.getVaultConfig(), pin).ok;
   }
 
   /**
@@ -707,9 +888,45 @@ export class StorageService {
    * re-run PBKDF2.
    */
   public static verifyAndUnlock(pin: string): boolean {
-    const ok = this.verifyPin(pin);
-    if (ok) setSessionPin(pin.trim());
-    return ok;
+    const normalizedPin = pin.trim();
+    const verification = verifyPinWithRoot(this.getVaultConfig(), normalizedPin);
+    if (!verification.ok) return false;
+    if (verification.salt && verification.rootKey) {
+      armSessionPin(normalizedPin, verification.salt, verification.rootKey);
+    } else {
+      setSessionPin(normalizedPin);
+    }
+    return true;
+  }
+
+  /** Upgrade a successfully unlocked legacy vault and replace old plaintext caches. */
+  public static migrateVaultEncryption(wallets: ManagedWallet[], pin: string): void {
+    const normalizedPin = pin.trim();
+    const config = this.getVaultConfig();
+    const hasVerifiedSessionRoot = sessionPin === normalizedPin && !!config.pinSalt && sessionKeyCache.has(config.pinSalt);
+    const verification = hasVerifiedSessionRoot ? undefined : verifyPinWithRoot(config, normalizedPin);
+    if (!config.hasPin || (verification && !verification.ok)) {
+      throw new Error('Vault passphrase verification failed; migration was not applied.');
+    }
+
+    if (config.pinKdf !== 'pbkdf2-sha256-v3' || !config.pinSalt) {
+      const salt = newSalt();
+      const rootKey = deriveKey(normalizedPin, salt);
+      const upgradedConfig: VaultConfig = {
+        ...config,
+        isLocked: false,
+        hasPin: true,
+        pinHash: deriveSubkey(rootKey, 'verifier'),
+        pinSalt: salt,
+        pinKdf: 'pbkdf2-sha256-v3',
+      };
+      localStorage.setItem(STORAGE_KEY_VAULT, JSON.stringify(upgradedConfig));
+      armSessionPin(normalizedPin, salt, rootKey);
+    } else if (!hasVerifiedSessionRoot && verification?.salt && verification.rootKey) {
+      armSessionPin(normalizedPin, verification.salt, verification.rootKey);
+    }
+
+    this.saveWallets(wallets, normalizedPin);
   }
 
   /**
@@ -854,4 +1071,3 @@ export class StorageService {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 }
-

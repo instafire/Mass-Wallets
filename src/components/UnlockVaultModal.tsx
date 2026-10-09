@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, KeyRound, ShieldAlert } from 'lucide-react';
-import { StorageService } from '../services/storageService';
+import { clearSessionPin, StorageService } from '../services/storageService';
 import type { ManagedWallet } from '../types';
 
 interface UnlockVaultModalProps {
@@ -29,14 +29,26 @@ export const UnlockVaultModal: React.FC<UnlockVaultModalProps> = ({ isOpen, onUn
       const ok = StorageService.verifyAndUnlock(pin.trim());
       if (ok) {
         const res = await StorageService.loadAllWalletsAsync(pin.trim());
+        if (res.error) {
+          clearSessionPin();
+          setError(res.error);
+          return;
+        }
+        if (!res.isEncrypted) {
+          clearSessionPin();
+          setError('Encrypted vault data was not found. No data was changed.');
+          return;
+        }
+        StorageService.migrateVaultEncryption(res.wallets, pin.trim());
         onUnlocked(res.wallets || []);
         setPin('');
         return;
       } else {
         setError('Incorrect PIN. Please try again.');
       }
-    } catch {
-      setError('Decryption failed. Please check your PIN.');
+    } catch (err) {
+      clearSessionPin();
+      setError(err instanceof Error ? err.message : 'Decryption failed. Please check your passphrase.');
     } finally {
       setIsSubmitting(false);
     }
@@ -53,14 +65,14 @@ export const UnlockVaultModal: React.FC<UnlockVaultModalProps> = ({ isOpen, onUn
         <div>
           <h2 className="text-2xl font-black text-white tracking-tight">Unlock Your Vault</h2>
           <p className="text-xs text-gray-400 mt-1.5">
-            Your wallets and 24-word recovery phrases are protected with master AES-256 PIN encryption.
+            Your wallets and recovery phrases are protected with authenticated AES-256 passphrase encryption.
           </p>
         </div>
 
         <form onSubmit={handleUnlock} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-gray-300 mb-1.5 text-left">
-              Enter Master Security PIN:
+              Enter Master Passphrase:
             </label>
             <input
               type="password"

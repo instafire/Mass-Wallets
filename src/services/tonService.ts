@@ -21,6 +21,7 @@ import type {
   NFTItem,
   NFTAttribute
 } from '../types';
+import { parseTokenUnits } from './tokenAmount';
 
 // Default Tonkeeper Subwallet ID Constant
 export const DEFAULT_TONKEEPER_SUBWALLET_ID = 698983191;
@@ -553,14 +554,13 @@ export class TonService {
     decimals = 9
   ): { webUrl: string; appUrl: string } {
     const params = new URLSearchParams();
-    if (amountStr && parseFloat(amountStr) > 0) {
-      // Integer string math: parseFloat * 10^decimals can lose a unit on
-      // large amounts. Split on the decimal point instead.
-      const [intPart = '0', fracPart = ''] = amountStr.trim().split('.');
-      const fracPadded = (fracPart + '0'.repeat(decimals)).slice(0, decimals);
-      const rawUnits = BigInt(intPart.replace(/\D/g, '') || '0') * (10n ** BigInt(decimals))
-        + BigInt(fracPadded.replace(/\D/g, '') || '0');
-      params.append('amount', rawUnits.toString());
+    if (amountStr) {
+      try {
+        const rawUnits = parseTokenUnits(amountStr, decimals);
+        if (rawUnits > 0n) params.append('amount', rawUnits.toString());
+      } catch {
+        // Incomplete/invalid form input should not crash the send modal.
+      }
     }
     if (comment && comment.trim() !== '') {
       params.append('text', comment.trim());
@@ -631,13 +631,15 @@ export class TonService {
       let transferMsg: any;
 
       if (tokenSymbol === 'TON' || tokenSymbol === '') {
+        const nanoAmount = parseTokenUnits(amountStr, 9);
+        if (nanoAmount <= 0n) throw new Error('Transfer amount must be greater than zero.');
         transferMsg = contractProvider.createTransfer({
           seqno,
           secretKey: key.secretKey,
           messages: [
             {
               to: Address.parse(recipientAddress),
-              value: toNano(amountStr),
+              value: nanoAmount,
               body: comment,
               bounce: false,
             },
@@ -659,10 +661,8 @@ export class TonService {
           network
         );
         // Integer string math — never float-multiply token amounts.
-        const [amtInt = '0', amtFrac = ''] = amountStr.trim().split('.');
-        const amtFracPadded = (amtFrac + '0'.repeat(decimals)).slice(0, decimals);
-        const rawUnits = BigInt(amtInt.replace(/\D/g, '') || '0') * (10n ** BigInt(decimals))
-          + BigInt(amtFracPadded.replace(/\D/g, '') || '0');
+        const rawUnits = parseTokenUnits(amountStr, decimals);
+        if (rawUnits <= 0n) throw new Error('Jetton transfer amount must be greater than zero.');
 
         const forwardPayload = beginCell();
         if (comment) {

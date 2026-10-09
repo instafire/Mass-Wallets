@@ -132,7 +132,7 @@ export const VaultRecoveryModal: React.FC<VaultRecoveryModalProps> = ({
               <form onSubmit={handleUnlock} className="max-w-xs mx-auto space-y-2">
                 <input
                   type="password"
-                  maxLength={6}
+                  maxLength={32}
                   value={pinInput}
                   onChange={(e) => {
                     setPinInput(e.target.value);
