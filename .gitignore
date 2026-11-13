@@ -15,6 +15,7 @@ dist-ssr
 # Wallet vault data — NEVER commit (contains seed phrases)
 vault_wallets.json
 vault_wallets.json.bak
+vault_wallets.json.tmp.*
 
 # Editor directories and files
 .vscode/*
